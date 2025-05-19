@@ -7,6 +7,7 @@ import {
 } from 'react-native-paper';
 import Slider from '@react-native-community/slider';
 import { auth, firestore } from '../firebase';
+import { doc, updateDoc, arrayUnion, collection, addDoc } from 'firebase/firestore';
 
 // Common allergy symptoms
 const COMMON_SYMPTOMS = [
@@ -38,28 +39,28 @@ export default function AllergyLogScreen({ navigation }) {
     
     try {
       setLoading(true);
-      const currentUser = auth().currentUser;
+      const currentUser = auth.currentUser;
       
       if (!currentUser) {
         throw new Error('User not found');
       }
       
-      // Create allergy report
+      // Create allergy report with current timestamp
       const report = {
         severity: severity,
         symptoms: symptoms,
         notes: notes.trim(),
-        timestamp: firestore.FieldValue.serverTimestamp()
+        timestamp: new Date()
       };
       
       // Add to user's severity history
-      const userRef = firestore().collection('users').doc(currentUser.uid);
-      await userRef.update({
-        severity_history: firestore.FieldValue.arrayUnion(report)
+      const userRef = doc(firestore, 'users', currentUser.uid);
+      await updateDoc(userRef, {
+        severity_history: arrayUnion(report)
       });
       
       // Also add to separate collection for easier querying
-      await firestore().collection('allergy_reports').add({
+      await addDoc(collection(firestore, 'allergy_reports'), {
         userId: currentUser.uid,
         ...report
       });

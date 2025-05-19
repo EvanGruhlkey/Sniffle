@@ -9,10 +9,11 @@ import {
   useWindowDimensions
 } from 'react-native';
 import { Card, Title, Paragraph, Button, ActivityIndicator } from 'react-native-paper';
-import { LineChart, BarChart } from 'react-native-chart-kit';
+import { LineChart } from 'react-native-chart-kit';
 import { auth, firestore } from '../firebase';
 import { getRiskColor } from '../utils/helpers';
 import { API_URL } from '../config';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc } from 'firebase/firestore';
 
 export default function PredictionScreen() {
   const { width } = useWindowDimensions();
@@ -30,11 +31,17 @@ export default function PredictionScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('Error', 'Please sign in to view predictions');
+        return;
+      }
+
       await Promise.all([
-        fetchPredictionHistory(),
-        fetchAllergyHistory(),
-        fetchTemporalPatterns(),
-        fetchRiskFactors(),
+        fetchPredictionHistory(currentUser),
+        fetchAllergyHistory(currentUser),
+        fetchTemporalPatterns(currentUser),
+        fetchRiskFactors(currentUser),
       ]);
     } catch (error) {
       console.error('Error loading prediction data:', error);
@@ -50,19 +57,18 @@ export default function PredictionScreen() {
     setRefreshing(false);
   };
   
-  const fetchPredictionHistory = async (retryCount = 0) => {
+  const fetchPredictionHistory = async (user, retryCount = 0) => {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000; // 2 seconds
 
     try {
-      const user = auth().currentUser;
-      if (!user) return;
+      const predictionsQuery = query(
+        collection(firestore, 'users', user.uid, 'predictions'),
+        orderBy('timestamp', 'desc'),
+        limit(10)
+      );
       
-      const predictionsQuery = firestore().collection('users').doc(user.uid).collection('predictions')
-        .orderBy('timestamp', 'desc')
-        .limit(10);
-      
-      const snapshot = await predictionsQuery.get();
+      const snapshot = await getDocs(predictionsQuery);
         
       if (!snapshot.empty) {
         const predictionData = snapshot.docs.map(doc => {
@@ -89,7 +95,7 @@ export default function PredictionScreen() {
            error.message.includes('Could not reach Cloud Firestore backend'))) {
         console.log(`Retrying prediction history fetch (${retryCount + 1}/${MAX_RETRIES})...`);
         setTimeout(() => {
-          fetchPredictionHistory(retryCount + 1);
+          fetchPredictionHistory(user, retryCount + 1);
         }, RETRY_DELAY);
         return;
       }
@@ -99,21 +105,18 @@ export default function PredictionScreen() {
         'Unable to load prediction history. Please check your internet connection and try again.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: () => fetchPredictionHistory(0) }
+          { text: 'Retry', onPress: () => fetchPredictionHistory(user, 0) }
         ]
       );
     }
   };
   
-  const fetchAllergyHistory = async (retryCount = 0) => {
+  const fetchAllergyHistory = async (user, retryCount = 0) => {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000; // 2 seconds
 
     try {
-      const user = auth().currentUser;
-      if (!user) return;
-      
-      const userDoc = await firestore().collection('users').doc(user.uid).get();
+      const userDoc = await getDoc(doc(firestore, 'users', user.uid));
         
       if (userDoc.exists()) {
         const userData = userDoc.data();
@@ -137,7 +140,7 @@ export default function PredictionScreen() {
            error.message.includes('Could not reach Cloud Firestore backend'))) {
         console.log(`Retrying allergy history fetch (${retryCount + 1}/${MAX_RETRIES})...`);
         setTimeout(() => {
-          fetchAllergyHistory(retryCount + 1);
+          fetchAllergyHistory(user, retryCount + 1);
         }, RETRY_DELAY);
         return;
       }
@@ -147,16 +150,13 @@ export default function PredictionScreen() {
         'Unable to load allergy history. Please check your internet connection and try again.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: () => fetchAllergyHistory(0) }
+          { text: 'Retry', onPress: () => fetchAllergyHistory(user, 0) }
         ]
       );
     }
   };
   
-  const fetchTemporalPatterns = async () => {
-    const user = auth().currentUser;
-    if (!user) return;
-    
+  const fetchTemporalPatterns = async (user) => {
     try {
       // Get Firebase Auth ID token
       const idToken = await user.getIdToken();
@@ -166,15 +166,21 @@ export default function PredictionScreen() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`, // Add Authorization header
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ userId: user.uid }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const result = await response.json();
       
       if (result.success) {
         setTemporalPatterns(result.patterns);
+      } else {
+        throw new Error(result.error || 'Failed to fetch temporal patterns');
       }
     } catch (error) {
       console.error('Error fetching temporal patterns:', error);
@@ -203,10 +209,7 @@ export default function PredictionScreen() {
     }
   };
   
-  const fetchRiskFactors = async () => {
-    const user = auth().currentUser;
-    if (!user) return;
-    
+  const fetchRiskFactors = async (user) => {
     try {
       // Get Firebase Auth ID token
       const idToken = await user.getIdToken();
@@ -216,15 +219,21 @@ export default function PredictionScreen() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`, // Add Authorization header
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ userId: user.uid }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const result = await response.json();
       
       if (result.success) {
         setRiskFactors(result.riskFactors);
+      } else {
+        throw new Error(result.error || 'Failed to fetch risk factors');
       }
     } catch (error) {
       console.error('Error fetching risk factors:', error);
@@ -254,8 +263,20 @@ export default function PredictionScreen() {
       datasets: [
         {
           data: recentPredictions.map(p => p.risk_level * 100),
-          color: (opacity = 1) => `rgba(98, 0, 238, ${opacity})`,
-          strokeWidth: 2
+          color: (opacity = 1) => `rgba(0, 206, 209, ${opacity})`, // Deep Turquoise
+          strokeWidth: 3,
+          // Add gradient fill below the line
+          withDots: true,
+          withInnerLines: true,
+          withOuterLines: true,
+          withVerticalLines: false,
+          withHorizontalLines: true,
+          withVerticalLabels: true,
+          withHorizontalLabels: true,
+          fillShadowGradient: '#00CED1',
+          fillShadowGradientOpacity: 0.2,
+          // Add confidence intervals if available
+          confidence: recentPredictions.map(p => p.confidence * 100)
         }
       ],
       legend: ['Risk %']
@@ -278,7 +299,7 @@ export default function PredictionScreen() {
             seasonal_severity.fall,
             seasonal_severity.winter
           ],
-          color: (opacity = 1) => `rgba(255, 107, 107, ${opacity})`,
+          color: (opacity = 1) => `rgba(32, 178, 170, ${opacity})`, // Light Sea Green
           strokeWidth: 2
         }
       ],
@@ -294,7 +315,9 @@ export default function PredictionScreen() {
       labels: riskFactors.map(rf => rf.factor),
       datasets: [
         {
-          data: riskFactors.map(rf => rf.weight * 100)
+          data: riskFactors.map(rf => rf.weight * 100),
+          color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`, // Emerald Green
+          strokeWidth: 2
         }
       ]
     };
@@ -305,16 +328,21 @@ export default function PredictionScreen() {
     backgroundGradientFrom: '#ffffff',
     backgroundGradientTo: '#ffffff',
     decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(98, 0, 238, ${opacity})`,
+    color: (opacity = 1) => `rgba(0, 206, 209, ${opacity})`, // Deep Turquoise
     labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
     style: {
       borderRadius: 16
     },
     propsForDots: {
-      r: '6',
+      r: '5',
       strokeWidth: '2',
       stroke: '#00CED1'
-    }
+    },
+    // Add proper padding to keep chart contents inside the box
+    paddingRight: 20,
+    paddingLeft: 12,
+    paddingTop: 24,
+    paddingBottom: 16
   };
   
   if (loading && !refreshing) {
@@ -351,11 +379,16 @@ export default function PredictionScreen() {
               <View style={styles.chartContainer}>
                 <LineChart
                   data={riskChartData}
-                  width={width - 40}
+                  width={width - 60}
                   height={220}
                   chartConfig={chartConfig}
                   bezier
                   style={styles.chart}
+                  withVerticalLabels={true}
+                  withHorizontalLabels={true}
+                  withInnerLines={true}
+                  yAxisLabel=""
+                  yAxisSuffix="%"
                 />
               </View>
             ) : (
@@ -372,16 +405,21 @@ export default function PredictionScreen() {
             <Title>Seasonal Pattern</Title>
             {seasonalChartData ? (
               <View style={styles.chartContainer}>
-                <BarChart
+                <LineChart
                   data={seasonalChartData}
-                  width={width - 40}
+                  width={width - 60}
                   height={220}
                   chartConfig={{
                     ...chartConfig,
-                    color: (opacity = 1) => `rgba(255, 107, 107, ${opacity})`
+                    color: (opacity = 1) => `rgba(32, 178, 170, ${opacity})` // Light Sea Green
                   }}
                   style={styles.chart}
-                  fromZero
+                  bezier
+                  withVerticalLabels={true}
+                  withHorizontalLabels={true}
+                  withInnerLines={true}
+                  yAxisLabel=""
+                  yAxisSuffix=""
                 />
               </View>
             ) : (
@@ -405,16 +443,21 @@ export default function PredictionScreen() {
             <Title>Risk Factors</Title>
             {riskFactorsChartData ? (
               <View style={styles.chartContainer}>
-                <BarChart
+                <LineChart
                   data={riskFactorsChartData}
-                  width={width - 40}
+                  width={width - 60}
                   height={220}
                   chartConfig={{
                     ...chartConfig,
-                    color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`
+                    color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})` // Emerald Green
                   }}
                   style={styles.chart}
-                  fromZero
+                  bezier
+                  withVerticalLabels={true}
+                  withHorizontalLabels={true}
+                  withInnerLines={true}
+                  yAxisLabel=""
+                  yAxisSuffix="%"
                 />
               </View>
             ) : (
@@ -453,7 +496,7 @@ export default function PredictionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#E0FFFF', // Light Cyan
+    backgroundColor: '#E0FFFF', // Changed from Light Cyan to White
   },
   content: {
     padding: 20,
@@ -498,8 +541,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 12,
     padding: 8,
-    backgroundColor: '#F0FFFF', // Azure
+    backgroundColor: '#FFFFFF', // Changed from Azure to White
     borderRadius: 12,
+    // Add more horizontal padding to fix overflow issues
+    paddingHorizontal: 10,
+    overflow: 'hidden' // This ensures content doesn't spill out
   },
   chart: {
     marginVertical: 12,
@@ -512,7 +558,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   insight: {
-    backgroundColor: '#F0FFFF', // Azure
+    backgroundColor: '#FFFFFF', // Changed from Azure to White
     padding: 16,
     borderRadius: 12,
     marginTop: 16,
@@ -524,7 +570,7 @@ const styles = StyleSheet.create({
   },
   factorsList: {
     marginTop: 20,
-    backgroundColor: '#F0FFFF', // Azure
+    backgroundColor: '#FFFFFF', // Changed from Azure to White
     padding: 16,
     borderRadius: 12,
     elevation: 2,

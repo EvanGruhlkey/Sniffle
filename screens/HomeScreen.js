@@ -9,12 +9,11 @@ import { Card, Title, Paragraph, Button, ActivityIndicator } from 'react-native-
 import { UserContext } from '../context/UserContext';
 import { getRiskColor, fetchEnvironmentalData } from '../utils/helpers';
 import { API_URL } from '../config';
-import { doc, getDoc, collection, query, orderBy, limit, getDocs, setDoc, serverTimestamp, getFirestore } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { app } from '../firebase';
+import { doc, collection, query, orderBy, limit, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, firestore } from '../firebase';
 
 export default function HomeScreen({ navigation }) {
-  const { userData, setUserData } = useContext(UserContext);
+  const { userData, loading: userDataLoading } = useContext(UserContext);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [prediction, setPrediction] = useState(null);
@@ -22,104 +21,70 @@ export default function HomeScreen({ navigation }) {
   const [recentFoodLogs, setRecentFoodLogs] = useState([]);
 
   useEffect(() => {
-    console.log('HomeScreen: Mounted. Starting useEffect. App is:', app);
+    console.log('HomeScreen: Mounted. Starting useEffect.');
     
-    let localAuth = null;
-    let localFirestore = null;
+    const loadAdditionalData = async () => {
+      try {
+        setLoading(true);
+        const currentUser = auth.currentUser;
+        
+        if (!currentUser) {
+          console.log('HomeScreen: No user found');
+          return;
+        }
 
-    try {
-      console.log('HomeScreen: Attempting to get auth instance from app.');
-      localAuth = getAuth(app);
-      console.log('HomeScreen: Successfully got auth instance.', localAuth);
-    } catch (error) {
-      console.error('HomeScreen: Error getting auth instance:', error);
-      setLoading(false);
-      return; // Stop execution if auth fails
-    }
-
-    try {
-      console.log('HomeScreen: Attempting to get firestore instance from app.');
-      localFirestore = getFirestore(app);
-      console.log('HomeScreen: Successfully got firestore instance.', localFirestore);
-    } catch (error) {
-      console.error('HomeScreen: Error getting firestore instance:', error);
-      setLoading(false);
-      return; // Stop execution if firestore fails
-    }
-      
-    console.log('HomeScreen: All instances obtained.');
-    console.log('HomeScreen: localAuth is:', localAuth);
-    console.log('HomeScreen: localFirestore is:', localFirestore);
-
-    fetchUserData(localAuth, localFirestore); // Pass local instances
-    fetchLatestPrediction(localAuth, localFirestore); // Pass local instances
-    const subscriber = onAuthStateChanged(localAuth, handleAuthStateChanged); // Use localAuth
-    return subscriber;
-
-  }, [app]); // Keep app in dependency array
-
-  const fetchUserData = async (auth, firestore) => {
-    try {
-      setLoading(true);
-      const currentUser = auth.currentUser;
-      
-      if (currentUser) {
-        console.log('HomeScreen: fetchUserData - Calling doc with firestore:', firestore);
-        const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
-          
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserData(data);
-          
-          // Get most recent food logs
-          const recentLogs = data.food_logs ? 
-            data.food_logs.slice(-3).reverse() : 
-            [];
+        console.log('HomeScreen: Loading additional data for user:', currentUser.uid);
+        
+        // Get most recent food logs from userData
+        if (userData && userData.food_logs) {
+          const recentLogs = userData.food_logs.slice(-3).reverse();
           setRecentFoodLogs(recentLogs);
         }
+        
+        // Fetch environmental data
+        const envData = await fetchEnvironmentalData();
+        setEnvironmentalData(envData);
+        
+        // Get latest prediction
+        await fetchLatestPrediction(currentUser);
+      } catch (error) {
+        console.error('HomeScreen: Error loading additional data:', error);
+        Alert.alert('Error', 'Failed to load some data');
+      } finally {
+        setLoading(false);
       }
-      
-      // Fetch environmental data
-      const envData = await fetchEnvironmentalData();
-      setEnvironmentalData(envData);
-      
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      Alert.alert('Error', 'Failed to load your data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  const fetchLatestPrediction = async (auth, firestore) => {
+    if (userData) {
+      loadAdditionalData();
+    }
+  }, [userData]); // Re-run when userData changes
+
+  const fetchLatestPrediction = async (currentUser) => {
     try {
-      const currentUser = auth.currentUser;
-      
-      if (!currentUser) return;
-      
       // Get latest prediction from Firestore
-      console.log('HomeScreen: fetchLatestPrediction - Calling query and collection with firestore:', firestore);
       const predictionsQuery = query(
         collection(firestore, 'users', currentUser.uid, 'predictions'),
         orderBy('timestamp', 'desc'),
         limit(1)
       );
       
-      // Fixed: Changed getDoc to getDocs for querying collections
       const predictionsSnapshot = await getDocs(predictionsQuery);
         
       if (!predictionsSnapshot.empty) {
-        setPrediction(predictionsSnapshot.docs[0].data());
+        const predictionData = predictionsSnapshot.docs[0].data();
+        setPrediction(predictionData);
       } else {
         // If no prediction exists, request a new one
-        requestNewPrediction(0, auth, firestore);
+        requestNewPrediction(0);
       }
     } catch (error) {
       console.error('Error fetching prediction:', error);
+      Alert.alert('Error', 'Failed to load prediction data');
     }
   };
 
-  const requestNewPrediction = async (retryCount = 0, auth, firestore) => {
+  const requestNewPrediction = async (retryCount = 0) => {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000; // 2 seconds
 
@@ -147,17 +112,11 @@ export default function HomeScreen({ navigation }) {
       if (result.success) {
         setPrediction(result.prediction);
         
-        // Store prediction in Firestore with retry logic
-        try {
-          console.log('HomeScreen: requestNewPrediction - Calling setDoc and doc with firestore:', firestore);
-          await setDoc(doc(firestore, 'users', currentUser.uid, 'predictions', result.prediction.id || Date.now().toString()), {
-            ...result.prediction,
-            timestamp: serverTimestamp(),
-          });
-        } catch (firestoreError) {
-          console.error('Error storing prediction in Firestore:', firestoreError);
-          // Continue even if Firestore storage fails - we still have the prediction in state
-        }
+        // Store prediction in Firestore
+        await setDoc(doc(firestore, 'users', currentUser.uid, 'predictions', result.prediction.id || Date.now().toString()), {
+          ...result.prediction,
+          timestamp: serverTimestamp(),
+        });
       } else {
         throw new Error(result.error || 'Failed to get prediction');
       }
@@ -170,7 +129,7 @@ export default function HomeScreen({ navigation }) {
            error.message.includes('Could not reach Cloud Firestore backend'))) {
         console.log(`Retrying prediction request (${retryCount + 1}/${MAX_RETRIES})...`);
         setTimeout(() => {
-          requestNewPrediction(retryCount + 1, auth, firestore);
+          requestNewPrediction(retryCount + 1);
         }, RETRY_DELAY);
         return;
       }
@@ -180,7 +139,7 @@ export default function HomeScreen({ navigation }) {
         'Unable to get prediction. Please check your internet connection and try again.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: () => requestNewPrediction(0, auth, firestore) }
+          { text: 'Retry', onPress: () => requestNewPrediction(0) }
         ]
       );
     } finally {
@@ -191,13 +150,15 @@ export default function HomeScreen({ navigation }) {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const localAuth = getAuth(app);
-      const localFirestore = getFirestore(app);
-      await fetchUserData(localAuth, localFirestore);
-      await fetchLatestPrediction(localAuth, localFirestore);
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        await fetchLatestPrediction(currentUser);
+        const envData = await fetchEnvironmentalData();
+        setEnvironmentalData(envData);
+      }
     } catch (error) {
-      console.error('HomeScreen: Error getting instances for onRefresh:', error);
-      Alert.alert('Error', 'Failed to refresh data.');
+      console.error('HomeScreen: Error refreshing data:', error);
+      Alert.alert('Error', 'Failed to refresh data');
     } finally {
       setRefreshing(false);
     }
@@ -207,15 +168,29 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate('AllergyLog');
   };
 
-  const handleAuthStateChanged = (user) => {
-    if (!user) {
-      // Handle user logout
-      setUserData(null);
-      setPrediction(null);
-      setEnvironmentalData(null);
-      setRecentFoodLogs([]);
-    }
-  };
+  if (userDataLoading || loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#00CED1" />
+        <Text style={styles.loadingText}>Loading your data...</Text>
+      </View>
+    );
+  }
+
+  if (!userData) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>No user data available</Text>
+        <Button 
+          mode="contained" 
+          onPress={() => navigation.navigate('Login')}
+          style={styles.loginButton}
+        >
+          Go to Login
+        </Button>
+      </View>
+    );
+  }
 
   return (
     <ScrollView 
@@ -281,9 +256,7 @@ export default function HomeScreen({ navigation }) {
               <Button 
                 mode="contained" 
                 onPress={() => {
-                  const localAuth = getAuth(app);
-                  const localFirestore = getFirestore(app);
-                  requestNewPrediction(0, localAuth, localFirestore);
+                  requestNewPrediction(0);
                 }}
                 style={styles.refreshButton}
               >
@@ -561,5 +534,18 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 18,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorText: {
+    marginBottom: 20,
+    fontSize: 16,
+    color: '#008B8B', // Dark Cyan
+  },
+  loginButton: {
+    backgroundColor: '#00CED1', // Deep Turquoise
   },
 });

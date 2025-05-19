@@ -128,6 +128,7 @@ export default function App() {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
   const [setupComplete, setSetupComplete] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(false);
 
   // Handle user state changes
   useEffect(() => {
@@ -162,29 +163,19 @@ export default function App() {
           console.log('App.js: User data from snapshot:', userData);
           const isSetupComplete = userData.setupComplete || false;
           console.log('App.js: Setting setupComplete state to:', isSetupComplete);
-          // Only update state if it's actually different to avoid unnecessary re-renders
-          if (isSetupComplete !== setupComplete) {
-              setSetupComplete(isSetupComplete);
-          }
+          setSetupComplete(isSetupComplete);
         } else {
           console.log('App.js: No user document found in snapshot');
-          // If user document doesn't exist, setup is not complete
-          if (setupComplete !== false) {
-             setSetupComplete(false);
-          }
+          setSetupComplete(false);
         }
       }, (error) => {
         console.error("App.js: Error in snapshot listener:", error);
-        // Handle errors gracefully, maybe show an error message
       });
 
       console.log('App.js: Firestore listener set up.');
     } else {
       console.log('App.js: No user, Firestore listener skipped.');
-      // If no user, ensure setupComplete is false
-       if (setupComplete !== false) {
-          setSetupComplete(false);
-       }
+      setSetupComplete(false);
     }
 
     // Cleanup function for snapshot listener
@@ -192,31 +183,12 @@ export default function App() {
       console.log('App.js: Cleaning up Firestore listener.');
       unsubscribeSnapshot();
     };
-  }, [user, setupComplete]); // Rerun this effect if user or setupComplete changes
-
-  // Log state changes for debugging
-  useEffect(() => {
-    console.log('App.js: setupComplete state changed to:', setupComplete);
-  }, [setupComplete]);
-
-  useEffect(() => {
-    console.log('App.js: user state changed to:', user ? user.uid : 'null');
-  }, [user]);
+  }, [user]); // Remove setupComplete from dependency array
 
   if (initializing) {
     console.log('App.js: App is initializing...');
     return null; // Render nothing while initializing
   }
-
-  console.log('App.js: Rendering navigation based on user and setupComplete state.');
-  console.log('App.js: Current user:', user ? user.uid : 'null');
-  console.log('App.js: Current setupComplete:', setupComplete);
-  console.log('App.js: Checking components for Stack.Navigator:');
-  console.log('App.js: LoginScreen is:', LoginScreen);
-  console.log('App.js: SignupScreen is:', SignupScreen);
-  console.log('App.js: SetupScreen is:', SetupScreen);
-  console.log('App.js: MainTabs is:', MainTabs);
-  console.log('App.js: AllergyLogScreen is:', AllergyLogScreen);
 
   return (
     <SafeAreaProvider>
@@ -226,28 +198,26 @@ export default function App() {
             <StatusBar style="auto" />
             
             <Stack.Navigator screenOptions={{ headerShown: false }}>
-              {user ? (
-                setupComplete ? (
-                  // User is logged in and setup is complete, show main tabs
-                  <Stack.Screen 
-                    name="Main" 
-                    component={MainTabs}
-                  />
-                ) : (
-                  // User is logged in but setup is not complete, show setup screen
-                  <Stack.Screen 
-                    name="Setup" 
-                    component={SetupScreen}
-                  />
-                )
-              ) : (
+              {!user ? (
                 // No user is logged in, show authentication screens
                 <>
-                  <Stack.Screen name="Login" component={LoginScreen} />
-                  <Stack.Screen name="Signup" component={SignupScreen} />
+                  <Stack.Screen 
+                    name="Login" 
+                    component={LoginScreen}
+                  />
+                  <Stack.Screen 
+                    name="Signup" 
+                    component={SignupScreen}
+                  />
                 </>
+              ) : (
+                // User is logged in, show main app
+                <Stack.Screen 
+                  name="Main" 
+                  component={MainTabs}
+                />
               )}
-              {/* This screen is accessible from within MainTabs or Setup if needed */}
+              {/* This screen is accessible from within MainTabs if needed */}
               <Stack.Screen 
                 name="AllergyLog" 
                 component={AllergyLogScreen}
