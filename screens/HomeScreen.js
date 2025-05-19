@@ -1,15 +1,17 @@
+console.log('HomeScreen: Module loaded.');
+
 import React, { useState, useEffect, useContext } from 'react';
 import { 
   StyleSheet, View, Text, TouchableOpacity, ScrollView, 
   RefreshControl, Alert 
 } from 'react-native';
 import { Card, Title, Paragraph, Button, ActivityIndicator } from 'react-native-paper';
-import { doc, getDoc, collection, query, orderBy, limit, getDocs, serverTimestamp, addDoc } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, firestore } from '../firebase';
 import { UserContext } from '../context/UserContext';
 import { getRiskColor, fetchEnvironmentalData } from '../utils/helpers';
 import { API_URL } from '../config';
+import { doc, getDoc, collection, query, orderBy, limit, getDocs, setDoc, serverTimestamp, getFirestore } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { app } from '../firebase';
 
 export default function HomeScreen({ navigation }) {
   const { userData, setUserData } = useContext(UserContext);
@@ -20,16 +22,49 @@ export default function HomeScreen({ navigation }) {
   const [recentFoodLogs, setRecentFoodLogs] = useState([]);
 
   useEffect(() => {
-    fetchUserData();
-    fetchLatestPrediction();
-  }, []);
+    console.log('HomeScreen: Mounted. Starting useEffect. App is:', app);
+    
+    let localAuth = null;
+    let localFirestore = null;
 
-  const fetchUserData = async () => {
+    try {
+      console.log('HomeScreen: Attempting to get auth instance from app.');
+      localAuth = getAuth(app);
+      console.log('HomeScreen: Successfully got auth instance.', localAuth);
+    } catch (error) {
+      console.error('HomeScreen: Error getting auth instance:', error);
+      setLoading(false);
+      return; // Stop execution if auth fails
+    }
+
+    try {
+      console.log('HomeScreen: Attempting to get firestore instance from app.');
+      localFirestore = getFirestore(app);
+      console.log('HomeScreen: Successfully got firestore instance.', localFirestore);
+    } catch (error) {
+      console.error('HomeScreen: Error getting firestore instance:', error);
+      setLoading(false);
+      return; // Stop execution if firestore fails
+    }
+      
+    console.log('HomeScreen: All instances obtained.');
+    console.log('HomeScreen: localAuth is:', localAuth);
+    console.log('HomeScreen: localFirestore is:', localFirestore);
+
+    fetchUserData(localAuth, localFirestore); // Pass local instances
+    fetchLatestPrediction(localAuth, localFirestore); // Pass local instances
+    const subscriber = onAuthStateChanged(localAuth, handleAuthStateChanged); // Use localAuth
+    return subscriber;
+
+  }, [app]); // Keep app in dependency array
+
+  const fetchUserData = async (auth, firestore) => {
     try {
       setLoading(true);
       const currentUser = auth.currentUser;
       
       if (currentUser) {
+        console.log('HomeScreen: fetchUserData - Calling doc with firestore:', firestore);
         const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
           
         if (userDoc.exists()) {
@@ -56,33 +91,38 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const fetchLatestPrediction = async () => {
+  const fetchLatestPrediction = async (auth, firestore) => {
     try {
       const currentUser = auth.currentUser;
       
       if (!currentUser) return;
       
       // Get latest prediction from Firestore
+      console.log('HomeScreen: fetchLatestPrediction - Calling query and collection with firestore:', firestore);
       const predictionsQuery = query(
         collection(firestore, 'users', currentUser.uid, 'predictions'),
         orderBy('timestamp', 'desc'),
         limit(1)
       );
       
+      // Fixed: Changed getDoc to getDocs for querying collections
       const predictionsSnapshot = await getDocs(predictionsQuery);
         
       if (!predictionsSnapshot.empty) {
         setPrediction(predictionsSnapshot.docs[0].data());
       } else {
         // If no prediction exists, request a new one
-        requestNewPrediction();
+        requestNewPrediction(0, auth, firestore);
       }
     } catch (error) {
       console.error('Error fetching prediction:', error);
     }
   };
 
-  const requestNewPrediction = async () => {
+  const requestNewPrediction = async (retryCount = 0, auth, firestore) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2 seconds
+
     try {
       setLoading(true);
       const currentUser = auth.currentUser;
@@ -98,25 +138,51 @@ export default function HomeScreen({ navigation }) {
         body: JSON.stringify({ userId: currentUser.uid }),
       });
       
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const result = await response.json();
       
       if (result.success) {
         setPrediction(result.prediction);
         
-        // Store prediction in Firestore
-        await addDoc(
-          collection(firestore, 'users', currentUser.uid, 'predictions'),
-          {
+        // Store prediction in Firestore with retry logic
+        try {
+          console.log('HomeScreen: requestNewPrediction - Calling setDoc and doc with firestore:', firestore);
+          await setDoc(doc(firestore, 'users', currentUser.uid, 'predictions', result.prediction.id || Date.now().toString()), {
             ...result.prediction,
             timestamp: serverTimestamp(),
-          }
-        );
+          });
+        } catch (firestoreError) {
+          console.error('Error storing prediction in Firestore:', firestoreError);
+          // Continue even if Firestore storage fails - we still have the prediction in state
+        }
       } else {
         throw new Error(result.error || 'Failed to get prediction');
       }
     } catch (error) {
       console.error('Error getting prediction:', error);
-      Alert.alert('Error', 'Failed to get your allergy risk prediction.');
+      
+      // Retry logic for network errors
+      if (retryCount < MAX_RETRIES && 
+          (error.message.includes('Network request failed') || 
+           error.message.includes('Could not reach Cloud Firestore backend'))) {
+        console.log(`Retrying prediction request (${retryCount + 1}/${MAX_RETRIES})...`);
+        setTimeout(() => {
+          requestNewPrediction(retryCount + 1, auth, firestore);
+        }, RETRY_DELAY);
+        return;
+      }
+      
+      Alert.alert(
+        'Connection Error',
+        'Unable to get prediction. Please check your internet connection and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => requestNewPrediction(0, auth, firestore) }
+        ]
+      );
     } finally {
       setLoading(false);
     }
@@ -124,21 +190,42 @@ export default function HomeScreen({ navigation }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchUserData();
-    await requestNewPrediction();
-    setRefreshing(false);
+    try {
+      const localAuth = getAuth(app);
+      const localFirestore = getFirestore(app);
+      await fetchUserData(localAuth, localFirestore);
+      await fetchLatestPrediction(localAuth, localFirestore);
+    } catch (error) {
+      console.error('HomeScreen: Error getting instances for onRefresh:', error);
+      Alert.alert('Error', 'Failed to refresh data.');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleAllergyReport = () => {
     navigation.navigate('AllergyLog');
   };
 
+  const handleAuthStateChanged = (user) => {
+    if (!user) {
+      // Handle user logout
+      setUserData(null);
+      setPrediction(null);
+      setEnvironmentalData(null);
+      setRecentFoodLogs([]);
+    }
+  };
 
   return (
     <ScrollView 
       style={styles.container}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#4CAF50" // Match theme primary color
+        />
       }
     >
       {/* User greeting */}
@@ -147,7 +234,7 @@ export default function HomeScreen({ navigation }) {
           Hello, {userData?.name || 'there'}!
         </Text>
         <Text style={styles.subGreeting}>
-          Here's your allergy update for today
+          Here's your Sniffle update for today
         </Text>
       </View>
       
@@ -193,7 +280,11 @@ export default function HomeScreen({ navigation }) {
               <Text>No prediction available</Text>
               <Button 
                 mode="contained" 
-                onPress={requestNewPrediction}
+                onPress={() => {
+                  const localAuth = getAuth(app);
+                  const localFirestore = getFirestore(app);
+                  requestNewPrediction(0, localAuth, localFirestore);
+                }}
                 style={styles.refreshButton}
               >
                 Get Prediction
@@ -271,6 +362,7 @@ export default function HomeScreen({ navigation }) {
             mode="outlined" 
             onPress={() => navigation.navigate('Food Log')}
             style={styles.viewMoreButton}
+            labelStyle={{ color: '#008B8B' }}
           >
             Log Food
           </Button>
@@ -291,7 +383,7 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#E0FFFF', // Light Cyan
     padding: 16,
   },
   loadingContainer: {
@@ -302,25 +394,33 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#666',
+    color: '#008B8B', // Dark Cyan
   },
   header: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   greeting: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#008B8B', // Dark Cyan
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   subGreeting: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 18,
+    color: '#20B2AA', // Light Sea Green
     marginTop: 4,
   },
   card: {
-    marginBottom: 16,
-    elevation: 2,
-    borderRadius: 8,
+    marginBottom: 20,
+    elevation: 4,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   riskIndicatorContainer: {
     flexDirection: 'row',
@@ -328,118 +428,138 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   riskIndicator: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
+    backgroundColor: '#00CED1', // Deep Turquoise
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   riskText: {
     color: 'white',
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
   },
   riskDescription: {
     flex: 1,
   },
   riskLabel: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 4,
+    color: '#008B8B', // Dark Cyan
   },
   riskDetails: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 16,
+    color: '#20B2AA', // Light Sea Green
   },
   factorsContainer: {
-    marginTop: 8,
-    padding: 12,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    marginTop: 12,
+    padding: 16,
+    backgroundColor: '#F0FFFF', // Azure
+    borderRadius: 12,
   },
   factorsTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
+    color: '#008B8B', // Dark Cyan
   },
   factor: {
-    fontSize: 14,
-    marginBottom: 4,
-    color: '#333',
+    fontSize: 16,
+    marginBottom: 8,
+    color: '#20B2AA', // Light Sea Green
   },
   noPrediction: {
     alignItems: 'center',
-    padding: 20,
+    padding: 24,
   },
   refreshButton: {
-    marginTop: 12,
+    marginTop: 16,
+    backgroundColor: '#00CED1', // Deep Turquoise
   },
   environmentalData: {
-    marginTop: 8,
+    marginTop: 12,
   },
   envRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   envItem: {
     flex: 1,
-    padding: 8,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    marginHorizontal: 4,
+    padding: 12,
+    backgroundColor: '#F0FFFF', // Azure
+    borderRadius: 12,
+    marginHorizontal: 6,
+    elevation: 2,
   },
   envLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
+    fontSize: 16,
+    color: '#008B8B', // Dark Cyan
+    marginBottom: 6,
+    fontWeight: '600',
   },
   envValue: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
+    color: '#00CED1', // Deep Turquoise
   },
   envUnit: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 'normal',
-    color: '#666',
+    color: '#20B2AA', // Light Sea Green
   },
   foodLog: {
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#F0FFFF', // Azure
+    borderRadius: 12,
   },
   foodLogDate: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
+    color: '#008B8B', // Dark Cyan
   },
   foodItems: {
-    marginBottom: 8,
+    marginBottom: 12,
   },
   foodItem: {
-    fontSize: 14,
-    marginBottom: 4,
+    fontSize: 16,
+    marginBottom: 6,
+    color: '#20B2AA', // Light Sea Green
   },
   foodNotes: {
-    fontSize: 12,
+    fontSize: 14,
     fontStyle: 'italic',
-    color: '#666',
+    color: '#008B8B', // Dark Cyan
   },
   viewMoreButton: {
-    marginTop: 8,
+    marginTop: 12,
+    borderColor: '#00CED1', // Deep Turquoise
   },
   reportButton: {
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#00CED1', // Deep Turquoise
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   reportButtonText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: 16,
+    fontSize: 18,
   },
 });

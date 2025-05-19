@@ -3,10 +3,25 @@ import {
   StyleSheet, View, Text, TouchableOpacity, KeyboardAvoidingView,
   Platform, ScrollView, Alert
 } from 'react-native';
-import { TextInput, Button } from 'react-native-paper';
+import { TextInput, Button, DefaultTheme } from 'react-native-paper';
+import { auth, firestore } from '../firebase';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, firestore } from '../firebase';
+
+// Define a custom theme for react-native-paper (optional, but good for consistency)
+const theme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: '#00CED1', // Deep Turquoise
+    accent: '#40E0D0', // Turquoise
+    background: '#AFEEEE', // PaleTurquoise
+    surface: '#FFFFFF',
+    text: '#333333',
+    onSurface: '#333333',
+    onBackground: '#333333',
+  },
+};
 
 export default function SignupScreen({ navigation }) {
   const [name, setName] = useState('');
@@ -36,9 +51,7 @@ export default function SignupScreen({ navigation }) {
       setLoading(true);
       
       // Create user with Firebase Authentication
-      const userCredential = await createUserWithEmailAndPassword(
-        auth, email, password
-      );
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
       // Update user profile with display name
@@ -86,8 +99,8 @@ export default function SignupScreen({ navigation }) {
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <Text style={styles.title}>Create Account</Text>
-        <Text style={styles.subtitle}>Sign up to track and predict your allergies</Text>
+        <Text style={styles.title}>Create Sniffle Account</Text>
+        <Text style={styles.subtitle}>Sign up to track and understand your allergies</Text>
         
         <View style={styles.formContainer}>
           <TextInput
@@ -96,6 +109,7 @@ export default function SignupScreen({ navigation }) {
             onChangeText={setName}
             mode="outlined"
             style={styles.input}
+            theme={theme}
           />
           
           <TextInput
@@ -106,6 +120,7 @@ export default function SignupScreen({ navigation }) {
             keyboardType="email-address"
             autoCapitalize="none"
             style={styles.input}
+            theme={theme}
           />
           
           <TextInput
@@ -115,6 +130,7 @@ export default function SignupScreen({ navigation }) {
             mode="outlined"
             secureTextEntry
             style={styles.input}
+            theme={theme}
           />
           
           <TextInput
@@ -124,6 +140,7 @@ export default function SignupScreen({ navigation }) {
             mode="outlined"
             secureTextEntry
             style={styles.input}
+            theme={theme}
           />
           
           <Button 
@@ -133,6 +150,8 @@ export default function SignupScreen({ navigation }) {
             disabled={loading}
             style={styles.signupButton}
             contentStyle={styles.buttonContent}
+            theme={theme}
+            labelStyle={styles.signupButtonText}
           >
             Create Account
           </Button>
@@ -152,33 +171,42 @@ export default function SignupScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#AFEEEE', // PaleTurquoise background
   },
   scrollContainer: {
     flexGrow: 1,
-    padding: 20,
-    paddingTop: 40,
+    padding: 30,
+    paddingTop: 50,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 24,
+    fontSize: 18,
+    color: '#555',
+    marginBottom: 30,
   },
   formContainer: {
     width: '100%',
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    elevation: 3,
   },
   input: {
-    marginBottom: 16,
+    marginBottom: 20,
+    backgroundColor: '#f5f5f5',
   },
   signupButton: {
-    marginTop: 8,
-    borderRadius: 4,
+    marginTop: 10,
+    borderRadius: 8,
+    paddingVertical: 5,
+  },
+  signupButtonText: {
+    fontSize: 18,
   },
   buttonContent: {
     paddingVertical: 8,
@@ -186,13 +214,15 @@ const styles = StyleSheet.create({
   loginContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 24,
+    marginTop: 30,
   },
   loginText: {
     color: '#666',
+    fontSize: 16,
   },
   loginLink: {
-    color: '#6200ee',
+    color: '#48D1CC', // MediumTurquoise
     fontWeight: 'bold',
+    fontSize: 16,
   },
 });

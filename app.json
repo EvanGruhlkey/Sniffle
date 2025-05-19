@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "f313f575-97e5-4eb8-917f-8e3b4cd1f99a"
+      }
+    },
+    "android": {
+      "package": "com.evangruhlkey.allergyx"
+    },
+    "ios": {
+      "bundleIdentifier": "com.evangruhlkey.allergyx",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}

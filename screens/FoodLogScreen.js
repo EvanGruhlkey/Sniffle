@@ -17,6 +17,7 @@ import {
 } from 'react-native-paper';
 import { auth, firestore } from '../firebase';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, doc, updateDoc, getDoc, query, orderBy, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
 
 const COMMON_FOODS = [
   'Milk', 'Eggs', 'Bread', 'Pasta', 'Rice', 
@@ -39,16 +40,13 @@ export default function FoodLogScreen() {
   const fetchFoodLogs = async () => {
     try {
       setFetchingLogs(true);
-      const user = auth().currentUser;
+      const currentUser = auth.currentUser;
       
-      if (!user) return;
+      if (!currentUser) return;
       
-      const userDoc = await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .get();
+      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
         
-      if (userDoc.exists) {
+      if (userDoc.exists()) {
         const userData = userDoc.data();
         // Get food logs and sort by timestamp (newest first)
         const logs = userData.food_logs || [];
@@ -100,9 +98,9 @@ export default function FoodLogScreen() {
     
     try {
       setLoading(true);
-      const user = auth().currentUser;
+      const currentUser = auth.currentUser;
       
-      if (!user) {
+      if (!currentUser) {
         throw new Error('User not found');
       }
       
@@ -110,17 +108,21 @@ export default function FoodLogScreen() {
       const foodLog = {
         items: selectedFoods,
         notes: notes.trim(),
-        timestamp: firestore.FieldValue.serverTimestamp()
+        timestamp: new Date()
       };
       
       // Add to user's food logs array
-      await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .update({
-          food_logs: firestore.FieldValue.arrayUnion(foodLog)
-        });
+      const userRef = doc(firestore, 'users', currentUser.uid);
+      await updateDoc(userRef, {
+        food_logs: arrayUnion(foodLog)
+      });
       
+      // Also add to separate collection for easier querying
+      await addDoc(collection(firestore, 'allergy_reports'), {
+        userId: currentUser.uid,
+        ...foodLog
+      });
+
       // Clear form
       setSelectedFoods([]);
       setNotes('');
@@ -170,7 +172,7 @@ export default function FoodLogScreen() {
                 selected={selectedFoods.includes(food)}
                 onPress={() => toggleFood(food)}
                 style={styles.chip}
-                selectedColor="#6200ee"
+                selectedColor="#00CED1"
                 mode={selectedFoods.includes(food) ? 'flat' : 'outlined'}
               >
                 {food}
@@ -250,7 +252,7 @@ export default function FoodLogScreen() {
           
           {fetchingLogs ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#6200ee" />
+              <ActivityIndicator size="small" color="#00CED1" />
               <Text style={styles.loadingText}>Loading food logs...</Text>
             </View>
           ) : foodLogs.length > 0 ? (
@@ -275,34 +277,39 @@ export default function FoodLogScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#E0FFFF', // Light Cyan
   },
   content: {
     padding: 20,
     paddingBottom: 40,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#008B8B', // Dark Cyan
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 18,
+    color: '#20B2AA', // Light Sea Green
     marginBottom: 24,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
+    color: '#008B8B', // Dark Cyan
   },
   sectionDescription: {
-    color: '#666',
+    color: '#20B2AA', // Light Sea Green
     marginBottom: 16,
+    fontSize: 16,
   },
   foodChips: {
     flexDirection: 'row',
@@ -310,29 +317,44 @@ const styles = StyleSheet.create({
   },
   chip: {
     margin: 4,
+    backgroundColor: '#F0FFFF', // Azure
+    borderColor: '#00CED1', // Deep Turquoise
   },
   divider: {
-    marginVertical: 16,
+    marginVertical: 20,
+    backgroundColor: '#00CED1', // Deep Turquoise
+    height: 1,
   },
   customFoodContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   customFoodInput: {
     flex: 1,
-    marginRight: 8,
+    marginRight: 12,
+    backgroundColor: '#FFFFFF',
   },
   addButton: {
     marginLeft: 8,
+    backgroundColor: '#00CED1', // Deep Turquoise
   },
   selectedFoods: {
-    marginTop: 16,
+    marginTop: 20,
+    backgroundColor: '#F0FFFF', // Azure
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   selectedTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
+    color: '#008B8B', // Dark Cyan
   },
   selectedChips: {
     flexDirection: 'row',
@@ -340,34 +362,48 @@ const styles = StyleSheet.create({
   },
   selectedChip: {
     margin: 4,
-    backgroundColor: '#e1bee7',
+    backgroundColor: '#00CED1', // Deep Turquoise
   },
   notesInput: {
-    marginTop: 8,
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
   },
   saveButton: {
-    marginTop: 8,
-    borderRadius: 4,
+    marginTop: 16,
+    borderRadius: 12,
+    backgroundColor: '#00CED1', // Deep Turquoise
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   saveButtonContent: {
     paddingVertical: 8,
   },
   loadingContainer: {
     alignItems: 'center',
-    padding: 20,
+    padding: 24,
   },
   loadingText: {
-    marginTop: 8,
-    color: '#666',
+    marginTop: 12,
+    color: '#008B8B', // Dark Cyan
+    fontSize: 16,
   },
   logItem: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    marginBottom: 8,
+    backgroundColor: '#F0FFFF', // Azure
+    borderRadius: 12,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#666',
-    padding: 20,
+    color: '#20B2AA', // Light Sea Green
+    padding: 24,
+    fontSize: 16,
   },
 });

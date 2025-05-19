@@ -5,8 +5,7 @@ import {
 import { 
   TextInput, Button, Chip, Divider, 
 } from 'react-native-paper';
-import Slider from '@react-native-community/slider'; // Import Slider from here instead
-import { doc, updateDoc, collection, addDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import Slider from '@react-native-community/slider';
 import { auth, firestore } from '../firebase';
 
 // Common allergy symptoms
@@ -39,7 +38,7 @@ export default function AllergyLogScreen({ navigation }) {
     
     try {
       setLoading(true);
-      const currentUser = auth.currentUser;
+      const currentUser = auth().currentUser;
       
       if (!currentUser) {
         throw new Error('User not found');
@@ -50,17 +49,17 @@ export default function AllergyLogScreen({ navigation }) {
         severity: severity,
         symptoms: symptoms,
         notes: notes.trim(),
-        timestamp: serverTimestamp()
+        timestamp: firestore.FieldValue.serverTimestamp()
       };
       
       // Add to user's severity history
-      const userRef = doc(firestore, 'users', currentUser.uid);
-      await updateDoc(userRef, {
-        severity_history: arrayUnion(report)
+      const userRef = firestore().collection('users').doc(currentUser.uid);
+      await userRef.update({
+        severity_history: firestore.FieldValue.arrayUnion(report)
       });
       
       // Also add to separate collection for easier querying
-      await addDoc(collection(firestore, 'allergy_reports'), {
+      await firestore().collection('allergy_reports').add({
         userId: currentUser.uid,
         ...report
       });
@@ -96,8 +95,8 @@ export default function AllergyLogScreen({ navigation }) {
             maximumValue={10}
             step={1}
             style={styles.slider}
-            minimumTrackTintColor="#6200ee"
-            thumbTintColor="#6200ee"
+            minimumTrackTintColor="#00CED1"
+            thumbTintColor="#00CED1"
           />
           <View style={styles.severityLabels}>
             <Text style={styles.severityLabel}>Mild</Text>
@@ -121,7 +120,7 @@ export default function AllergyLogScreen({ navigation }) {
                 selected={symptoms.includes(symptom)}
                 onPress={() => toggleSymptom(symptom)}
                 style={styles.chip}
-                selectedColor="#6200ee"
+                selectedColor="#00CED1"
                 mode={symptoms.includes(symptom) ? 'flat' : 'outlined'}
               >
                 {symptom}
@@ -202,7 +201,7 @@ const styles = StyleSheet.create({
   severityValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#6200ee',
+    color: '#00CED1',
     textAlign: 'center',
     marginVertical: 8,
   },

@@ -7,8 +7,8 @@ import {
   Alert
 } from 'react-native';
 import { Button, Chip, TextInput, Divider } from 'react-native-paper';
-// Import Firebase services directly to see what we're working with
-import firebase from '../firebase';
+import { auth, firestore } from '../firebase';
+import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 
 // Common allergens for quick selection
 const COMMON_ALLERGENS = [
@@ -42,30 +42,55 @@ export default function SetupScreen() {
   };
   
   const completeSetup = async () => {
+    console.log('Starting setup completion...');
     try {
       setLoading(true);
-      const user = firebase.auth().currentUser;
+      const currentUser = auth.currentUser;
       
-      if (!user) {
+      if (!currentUser) {
+        console.log('No user found in auth');
         throw new Error('User not found');
       }
       
-      // Update user document
-      await firebase.firestore().collection('users').doc(user.uid).update({
+      console.log('Updating user document for:', currentUser.uid);
+      const userRef = doc(firestore, 'users', currentUser.uid);
+      
+      // First update the document
+      await updateDoc(userRef, {
         allergens: selectedAllergens,
         setupComplete: true,
-        updated_at: firebase.firestore.FieldValue.serverTimestamp()
+        updated_at: serverTimestamp()
       });
       
-      // Navigation will happen automatically due to the auth state listener in App.js
+      console.log('Setup completed successfully');
+      
+      // Force a small delay to ensure the update is processed
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Try to force a re-read of the document
+      const updatedDoc = await getDoc(userRef);
+      if (updatedDoc.exists()) {
+        const data = updatedDoc.data();
+        console.log('Updated document data:', data);
+        if (data.setupComplete) {
+          console.log('Setup complete flag is true in document');
+        } else {
+          console.log('Setup complete flag is false in document');
+        }
+      }
+      
     } catch (error) {
       console.error('Setup error:', error);
-      Alert.alert('Error', 'Failed to save your profile. Please try again.');
+      Alert.alert(
+        'Error',
+        'Failed to save your profile. Please try again.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setLoading(false);
     }
   };
-  
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
@@ -87,7 +112,7 @@ export default function SetupScreen() {
                 selected={selectedAllergens.includes(allergen)}
                 onPress={() => toggleAllergen(allergen)}
                 style={styles.chip}
-                selectedColor="#6200ee"
+                selectedColor="#48D1CC"
                 mode={selectedAllergens.includes(allergen) ? 'flat' : 'outlined'}
               >
                 {allergen}
@@ -157,7 +182,7 @@ export default function SetupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#AFEEEE', // PaleTurquoise background
   },
   content: {
     padding: 20,
@@ -222,11 +247,12 @@ const styles = StyleSheet.create({
   },
   selectedChip: {
     margin: 4,
-    backgroundColor: '#e1bee7',
+    backgroundColor: '#E0FFFF', // LightCyan
   },
   completeButton: {
     marginTop: 24,
     borderRadius: 4,
+    backgroundColor: '#48D1CC', // MediumTurquoise
   },
   completeButtonContent: {
     paddingVertical: 8,

@@ -21,29 +21,44 @@ import {
 import { auth, firestore } from '../firebase';
 import { UserContext } from '../context/UserContext';
 import { Ionicons } from '@expo/vector-icons';
+import { signOut } from 'firebase/auth';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 export default function ProfileScreen() {
   const { userData, setUserData } = useContext(UserContext);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(true);
+  const [user, setUser] = useState(null);
   
   useEffect(() => {
+    loadUserProfile();
     fetchUserPreferences();
   }, []);
   
+  const loadUserProfile = async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
+      if (userDoc.exists()) {
+        setUser(userDoc.data());
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      Alert.alert('Error', 'Failed to load profile');
+    }
+  };
+  
   const fetchUserPreferences = async () => {
     try {
-      const user = auth().currentUser;
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
       
-      if (!user) return;
-      
-      const userDoc = await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .get();
+      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
         
-      if (userDoc.exists) {
+      if (userDoc.exists()) {
         const data = userDoc.data();
         
         // Set notification and location preferences
@@ -58,17 +73,14 @@ export default function ProfileScreen() {
   const updatePreference = async (preference, value) => {
     try {
       setLoading(true);
-      const user = auth().currentUser;
+      const currentUser = auth.currentUser;
       
-      if (!user) return;
+      if (!currentUser) return;
       
       const updateData = {};
       updateData[preference] = value;
       
-      await firestore()
-        .collection('users')
-        .doc(user.uid)
-        .update(updateData);
+      await updateDoc(doc(firestore, 'users', currentUser.uid), updateData);
         
       // Update local state
       if (preference === 'notifications_enabled') {
@@ -84,12 +96,11 @@ export default function ProfileScreen() {
     }
   };
   
-  const handleSignOut = async () => {
+  const handleLogout = async () => {
     try {
-      await auth().signOut();
-      // The auth state listener in App.js will handle navigation
+      await signOut(auth);
     } catch (error) {
-      console.error('Sign out error:', error);
+      console.error('Error signing out:', error);
       Alert.alert('Error', 'Failed to sign out');
     }
   };
@@ -100,7 +111,7 @@ export default function ProfileScreen() {
       'Are you sure you want to sign out?',
       [
         {text: 'Cancel', style: 'cancel'},
-        {text: 'Sign Out', onPress: handleSignOut, style: 'destructive'},
+        {text: 'Sign Out', onPress: handleLogout, style: 'destructive'},
       ]
     );
   };
@@ -143,6 +154,7 @@ export default function ProfileScreen() {
               mode="outlined" 
               style={styles.editButton}
               onPress={() => Alert.alert('Coming Soon', 'This feature will be available in a future update.')}
+              labelStyle={{ color: '#00CED1' }}
             >
               Edit Allergens
             </Button>
@@ -185,9 +197,9 @@ export default function ProfileScreen() {
         
         <Card style={styles.card}>
           <Card.Content>
-            <Title>About Allergyx</Title>
+            <Title>About Sniffle</Title>
             <Paragraph>
-              Allergyx helps you predict and prevent allergy flare-ups by analyzing your history, 
+              Sniffle helps you predict and prevent allergy flare-ups by analyzing your history, 
               food intake, and environmental factors. We use machine learning to provide personalized
               risk assessments and alerts.
             </Paragraph>
@@ -203,7 +215,7 @@ export default function ProfileScreen() {
           onPress={confirmSignOut}
           style={styles.signOutButton}
           contentStyle={styles.signOutButtonContent}
-          color="#ff6b6b"
+          labelStyle={{ color: '#ff6b6b' }}
         >
           Sign Out
         </Button>
@@ -215,37 +227,50 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#E0FFFF', // Light Cyan
+    padding: 20,
   },
   content: {
-    padding: 20,
     paddingBottom: 40,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
   },
   avatar: {
-    backgroundColor: '#6200ee',
-    marginBottom: 16,
+    backgroundColor: '#00CED1', // Deep Turquoise
+    marginBottom: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   userName: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#008B8B', // Dark Cyan
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   userEmail: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 4,
+    fontSize: 18,
+    color: '#20B2AA', // Light Sea Green
+    marginTop: 8,
   },
   card: {
-    marginBottom: 16,
-    elevation: 2,
-    borderRadius: 8,
+    marginBottom: 20,
+    elevation: 4,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   allergensContainer: {
-    marginVertical: 16,
+    marginVertical: 20,
   },
   allergenChips: {
     flexDirection: 'row',
@@ -253,31 +278,49 @@ const styles = StyleSheet.create({
   },
   allergenChip: {
     margin: 4,
-    backgroundColor: '#e1bee7',
+    backgroundColor: '#00CED1', // Deep Turquoise
+    elevation: 2,
   },
   allergenChipText: {
-    color: '#333',
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   noDataText: {
     textAlign: 'center',
-    padding: 16,
-    color: '#666',
+    padding: 24,
+    color: '#20B2AA', // Light Sea Green
+    fontSize: 16,
   },
   editButton: {
-    borderColor: '#6200ee',
+    borderColor: '#00CED1', // Deep Turquoise
+    color: '#00CED1', // Deep Turquoise
+    marginTop: 12,
   },
   versionContainer: {
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 20,
   },
   versionText: {
-    color: '#999',
+    color: '#20B2AA', // Light Sea Green
+    fontSize: 14,
   },
   signOutButton: {
-    marginTop: 8,
-    borderColor: '#ff6b6b',
+    marginTop: 16,
+    borderColor: '#00CED1', // Deep Turquoise
+    borderRadius: 12,
   },
   signOutButtonContent: {
     paddingVertical: 8,
+  },
+  insight: {
+    backgroundColor: '#F0FFFF', // Azure
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
 });

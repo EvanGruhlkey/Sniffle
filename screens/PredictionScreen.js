@@ -50,57 +50,106 @@ export default function PredictionScreen() {
     setRefreshing(false);
   };
   
-  const fetchPredictionHistory = async () => {
-    const user = auth().currentUser;
-    if (!user) return;
-    
-    const snapshot = await firestore()
-      .collection('users')
-      .doc(user.uid)
-      .collection('predictions')
-      .orderBy('timestamp', 'desc')
-      .limit(10)
-      .get();
+  const fetchPredictionHistory = async (retryCount = 0) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2 seconds
+
+    try {
+      const user = auth().currentUser;
+      if (!user) return;
       
-    if (!snapshot.empty) {
-      const predictionData = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          risk_level: data.risk_level,
-          confidence: data.confidence,
-          contributing_factors: data.contributing_factors || [],
-          date: data.timestamp ? data.timestamp.toDate() : new Date(),
-        };
-      });
+      const predictionsQuery = firestore().collection('users').doc(user.uid).collection('predictions')
+        .orderBy('timestamp', 'desc')
+        .limit(10);
       
-      // Sort by date (oldest first for charts)
-      predictionData.sort((a, b) => a.date - b.date);
-      setPredictions(predictionData);
+      const snapshot = await predictionsQuery.get();
+        
+      if (!snapshot.empty) {
+        const predictionData = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            risk_level: data.risk_level,
+            confidence: data.confidence,
+            contributing_factors: data.contributing_factors || [],
+            date: data.timestamp ? data.timestamp.toDate() : new Date(),
+          };
+        });
+        
+        // Sort by date (oldest first for charts)
+        predictionData.sort((a, b) => a.date - b.date);
+        setPredictions(predictionData);
+      }
+    } catch (error) {
+      console.error('Error fetching prediction history:', error);
+      
+      // Retry logic for network errors
+      if (retryCount < MAX_RETRIES && 
+          (error.message.includes('Network request failed') || 
+           error.message.includes('Could not reach Cloud Firestore backend'))) {
+        console.log(`Retrying prediction history fetch (${retryCount + 1}/${MAX_RETRIES})...`);
+        setTimeout(() => {
+          fetchPredictionHistory(retryCount + 1);
+        }, RETRY_DELAY);
+        return;
+      }
+      
+      Alert.alert(
+        'Connection Error',
+        'Unable to load prediction history. Please check your internet connection and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => fetchPredictionHistory(0) }
+        ]
+      );
     }
   };
   
-  const fetchAllergyHistory = async () => {
-    const user = auth().currentUser;
-    if (!user) return;
-    
-    const userDoc = await firestore()
-      .collection('users')
-      .doc(user.uid)
-      .get();
+  const fetchAllergyHistory = async (retryCount = 0) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2 seconds
+
+    try {
+      const user = auth().currentUser;
+      if (!user) return;
       
-    if (userDoc.exists) {
-      const userData = userDoc.data();
-      const history = userData.severity_history || [];
+      const userDoc = await firestore().collection('users').doc(user.uid).get();
+        
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const history = userData.severity_history || [];
+        
+        // Convert timestamps and sort by date
+        const historyWithDates = history.map(entry => ({
+          ...entry,
+          date: entry.timestamp ? entry.timestamp.toDate() : new Date()
+        }));
+        
+        historyWithDates.sort((a, b) => a.date - b.date);
+        setAllergyHistory(historyWithDates);
+      }
+    } catch (error) {
+      console.error('Error fetching allergy history:', error);
       
-      // Convert timestamps and sort by date
-      const historyWithDates = history.map(entry => ({
-        ...entry,
-        date: entry.timestamp ? entry.timestamp.toDate() : new Date()
-      }));
+      // Retry logic for network errors
+      if (retryCount < MAX_RETRIES && 
+          (error.message.includes('Network request failed') || 
+           error.message.includes('Could not reach Cloud Firestore backend'))) {
+        console.log(`Retrying allergy history fetch (${retryCount + 1}/${MAX_RETRIES})...`);
+        setTimeout(() => {
+          fetchAllergyHistory(retryCount + 1);
+        }, RETRY_DELAY);
+        return;
+      }
       
-      historyWithDates.sort((a, b) => a.date - b.date);
-      setAllergyHistory(historyWithDates);
+      Alert.alert(
+        'Connection Error',
+        'Unable to load allergy history. Please check your internet connection and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => fetchAllergyHistory(0) }
+        ]
+      );
     }
   };
   
@@ -109,11 +158,15 @@ export default function PredictionScreen() {
     if (!user) return;
     
     try {
+      // Get Firebase Auth ID token
+      const idToken = await user.getIdToken();
+
       // This would be an API call to get patterns
       const response = await fetch(`${API_URL}/api/analysis/temporal-patterns`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`, // Add Authorization header
         },
         body: JSON.stringify({ userId: user.uid }),
       });
@@ -155,11 +208,15 @@ export default function PredictionScreen() {
     if (!user) return;
     
     try {
+      // Get Firebase Auth ID token
+      const idToken = await user.getIdToken();
+
       // This would be an API call to get risk factors
       const response = await fetch(`${API_URL}/api/analysis/risk-factors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`, // Add Authorization header
         },
         body: JSON.stringify({ userId: user.uid }),
       });
@@ -256,14 +313,14 @@ export default function PredictionScreen() {
     propsForDots: {
       r: '6',
       strokeWidth: '2',
-      stroke: '#6200ee'
+      stroke: '#00CED1'
     }
   };
   
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6200ee" />
+        <ActivityIndicator size="large" color="#00CED1" />
         <Text style={styles.loadingText}>Loading prediction data...</Text>
       </View>
     );
@@ -396,7 +453,7 @@ export default function PredictionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#E0FFFF', // Light Cyan
   },
   content: {
     padding: 20,
@@ -406,66 +463,96 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 24,
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 12,
     fontSize: 16,
-    color: '#666',
+    color: '#008B8B', // Dark Cyan
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#008B8B', // Dark Cyan
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 18,
+    color: '#20B2AA', // Light Sea Green
     marginBottom: 24,
   },
   card: {
-    marginBottom: 16,
-    elevation: 2,
-    borderRadius: 8,
+    marginBottom: 20,
+    elevation: 4,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   chartContainer: {
     alignItems: 'center',
-    marginVertical: 8,
+    marginVertical: 12,
+    padding: 8,
+    backgroundColor: '#F0FFFF', // Azure
+    borderRadius: 12,
   },
   chart: {
-    marginVertical: 8,
+    marginVertical: 12,
     borderRadius: 16,
   },
   noDataText: {
     textAlign: 'center',
-    padding: 20,
-    color: '#666',
+    padding: 24,
+    color: '#20B2AA', // Light Sea Green
+    fontSize: 16,
   },
   insight: {
-    backgroundColor: '#e8f5e9',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 12,
+    backgroundColor: '#F0FFFF', // Azure
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   factorsList: {
-    marginTop: 16,
-    backgroundColor: '#f9f9f9',
-    padding: 12,
-    borderRadius: 8,
+    marginTop: 20,
+    backgroundColor: '#F0FFFF', // Azure
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   factorsTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 12,
+    color: '#008B8B', // Dark Cyan
   },
   factorItem: {
-    fontSize: 14,
-    marginBottom: 4,
-    color: '#333',
+    fontSize: 16,
+    marginBottom: 8,
+    color: '#20B2AA', // Light Sea Green
   },
   refreshButton: {
-    marginTop: 8,
+    marginTop: 16,
     marginBottom: 24,
+    backgroundColor: '#00CED1', // Deep Turquoise
+    borderRadius: 12,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
 });
