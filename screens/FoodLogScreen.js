@@ -17,7 +17,7 @@ import {
 } from 'react-native-paper';
 import { auth, firestore } from '../firebase';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, updateDoc, getDoc, query, orderBy, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, query, orderBy, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
 
 const COMMON_FOODS = [
   'Milk', 'Eggs', 'Bread', 'Pasta', 'Rice', 
@@ -111,11 +111,9 @@ export default function FoodLogScreen() {
         timestamp: new Date()
       };
       
-      // Add to user's food logs array
+      // Add to user's food logs array (create doc if missing)
       const userRef = doc(firestore, 'users', currentUser.uid);
-      await updateDoc(userRef, {
-        food_logs: arrayUnion(foodLog)
-      });
+      await setDoc(userRef, { food_logs: arrayUnion(foodLog) }, { merge: true });
       
       // Also add to separate collection for easier querying
       await addDoc(collection(firestore, 'allergy_reports'), {

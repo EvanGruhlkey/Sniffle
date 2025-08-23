@@ -210,8 +210,15 @@ export default function App() {
                     component={SignupScreen}
                   />
                 </>
+              ) : !setupComplete ? (
+                // User is logged in but not finished setup
+                <Stack.Screen 
+                  name="Setup" 
+                  component={SetupScreen}
+                  options={{ headerShown: true, title: 'Complete Setup' }}
+                />
               ) : (
-                // User is logged in, show main app
+                // User is logged in and setup complete, show main app
                 <Stack.Screen 
                   name="Main" 
                   component={MainTabs}

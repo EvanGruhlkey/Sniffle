@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Button, Chip, TextInput, Divider } from 'react-native-paper';
 import { auth, firestore } from '../firebase';
-import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 
 // Common allergens for quick selection
 const COMMON_ALLERGENS = [
@@ -56,11 +56,11 @@ export default function SetupScreen() {
       const userRef = doc(firestore, 'users', currentUser.uid);
       
       // First update the document
-      await updateDoc(userRef, {
+      await setDoc(userRef, {
         allergens: selectedAllergens,
         setupComplete: true,
         updated_at: serverTimestamp()
-      });
+      }, { merge: true });
       
       console.log('Setup completed successfully');
       

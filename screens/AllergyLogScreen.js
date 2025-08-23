@@ -7,7 +7,7 @@ import {
 } from 'react-native-paper';
 import Slider from '@react-native-community/slider';
 import { auth, firestore } from '../firebase';
-import { doc, updateDoc, arrayUnion, collection, addDoc } from 'firebase/firestore';
+import { doc, setDoc, arrayUnion, collection, addDoc, getDoc } from 'firebase/firestore';
 
 // Common allergy symptoms
 const COMMON_SYMPTOMS = [
@@ -53,11 +53,9 @@ export default function AllergyLogScreen({ navigation }) {
         timestamp: new Date()
       };
       
-      // Add to user's severity history
+      // Add to user's severity history (create doc if missing)
       const userRef = doc(firestore, 'users', currentUser.uid);
-      await updateDoc(userRef, {
-        severity_history: arrayUnion(report)
-      });
+      await setDoc(userRef, { severity_history: arrayUnion(report) }, { merge: true });
       
       // Also add to separate collection for easier querying
       await addDoc(collection(firestore, 'allergy_reports'), {

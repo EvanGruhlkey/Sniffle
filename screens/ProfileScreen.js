@@ -22,7 +22,7 @@ import { auth, firestore } from '../firebase';
 import { UserContext } from '../context/UserContext';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export default function ProfileScreen() {
   const { userData, setUserData } = useContext(UserContext);
@@ -80,7 +80,7 @@ export default function ProfileScreen() {
       const updateData = {};
       updateData[preference] = value;
       
-      await updateDoc(doc(firestore, 'users', currentUser.uid), updateData);
+      await setDoc(doc(firestore, 'users', currentUser.uid), updateData, { merge: true });
         
       // Update local state
       if (preference === 'notifications_enabled') {

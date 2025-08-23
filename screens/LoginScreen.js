@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { TextInput, Button, DefaultTheme } from 'react-native-paper';
 import { auth } from '../firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,7 +29,7 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
+  
   // Animation values for background elements
   const animatedElements = useRef(
     Array(50).fill(0).map(() => ({
@@ -118,7 +118,7 @@ export default function LoginScreen({ navigation }) {
 
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, email.trim(), password);
       // Navigation will be handled automatically by the auth state listener in App.js
     } catch (error) {
       let errorMessage = 'Failed to sign in';
@@ -139,6 +139,34 @@ export default function LoginScreen({ navigation }) {
       }
       
       Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      Alert.alert('Reset Password', 'Enter your email address first.');
+      return;
+    }
+    try {
+      setLoading(true);
+      await sendPasswordResetEmail(auth, trimmed);
+      Alert.alert('Email Sent', 'Check your inbox for a reset link.');
+    } catch (error) {
+      let message = 'Could not send reset email';
+      switch (error.code) {
+        case 'auth/invalid-email':
+          message = 'Invalid email address format';
+          break;
+        case 'auth/user-not-found':
+          message = 'No account found with that email';
+          break;
+        default:
+          message = error.message;
+      }
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }
@@ -224,7 +252,7 @@ export default function LoginScreen({ navigation }) {
           
           {/* Navigation links */}
           <View style={styles.linksContainer}>
-            <TouchableOpacity onPress={() => Alert.alert('Coming Soon', 'Forgot Password functionality is not yet implemented.')}>
+            <TouchableOpacity onPress={handlePasswordReset}>
               <Text style={styles.forgotPasswordLink}>Forgot Password?</Text>
             </TouchableOpacity>
 

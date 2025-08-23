@@ -13,18 +13,27 @@ export const UserProvider = ({ children }) => {
 
   useEffect(() => {
     console.log('UserContext: Setting up auth state listener');
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubscribeUserSnapshot = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       console.log('UserContext: Auth state changed. User:', user ? user.uid : 'null');
+
+      // Clean up previous snapshot if any when auth state changes
+      if (unsubscribeUserSnapshot) {
+        console.log('UserContext: Cleaning up previous Firestore listener');
+        unsubscribeUserSnapshot();
+        unsubscribeUserSnapshot = null;
+      }
+
       if (user) {
         try {
-          // Set up real-time listener for user data
           const userRef = doc(firestore, 'users', user.uid);
           console.log('UserContext: Setting up Firestore listener for user:', user.uid);
-          
-          const unsubscribeSnapshot = onSnapshot(userRef, (doc) => {
+
+          unsubscribeUserSnapshot = onSnapshot(userRef, (docSnap) => {
             console.log('UserContext: Firestore snapshot received');
-            if (doc.exists()) {
-              const data = doc.data();
+            if (docSnap.exists()) {
+              const data = docSnap.data();
               console.log('UserContext: User data received:', data);
               setUserData(data);
             } else {
@@ -36,11 +45,6 @@ export const UserProvider = ({ children }) => {
             console.error('UserContext: Error in user data listener:', error);
             setLoading(false);
           });
-
-          return () => {
-            console.log('UserContext: Cleaning up Firestore listener');
-            unsubscribeSnapshot();
-          };
         } catch (error) {
           console.error('UserContext: Error setting up user data listener:', error);
           setLoading(false);
@@ -54,7 +58,11 @@ export const UserProvider = ({ children }) => {
 
     return () => {
       console.log('UserContext: Cleaning up auth listener');
-      unsubscribe();
+      unsubscribeAuth();
+      if (unsubscribeUserSnapshot) {
+        console.log('UserContext: Cleaning up Firestore listener');
+        unsubscribeUserSnapshot();
+      }
     };
   }, []);
 
