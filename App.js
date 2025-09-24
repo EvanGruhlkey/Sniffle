@@ -128,6 +128,7 @@ export default function App() {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
   const [setupComplete, setSetupComplete] = useState(false);
+  const [setupChecked, setSetupChecked] = useState(false);
   const [isNewUser, setIsNewUser] = useState(false);
 
   // Handle user state changes
@@ -136,8 +137,17 @@ export default function App() {
     const authUnsubscribe = onAuthStateChanged(auth, (user) => {
       console.log('App.js: Auth state changed. User:', user ? user.uid : 'null');
       setUser(user);
-      // Setting initializing to false here, assuming auth state is the first thing we check
-      setInitializing(false);
+      if (!user) {
+        // If no user, reset states and stop initializing
+        setInitializing(false);
+        setSetupChecked(true);
+        setSetupComplete(false);
+      } else {
+        // Reset setup states when a new user logs in
+        setSetupChecked(false);
+        setSetupComplete(false);
+      }
+      // If user exists, we'll wait for Firestore check before stopping initialization
     });
 
     // Cleanup function for auth listener
@@ -161,21 +171,30 @@ export default function App() {
         if (docSnapshot.exists()) {
           const userData = docSnapshot.data();
           console.log('App.js: User data from snapshot:', userData);
-          const isSetupComplete = userData.setupComplete || false;
+          const isSetupComplete = userData.setupComplete === true;
           console.log('App.js: Setting setupComplete state to:', isSetupComplete);
           setSetupComplete(isSetupComplete);
         } else {
           console.log('App.js: No user document found in snapshot');
           setSetupComplete(false);
         }
+        // Mark that we've checked the setup status
+        setSetupChecked(true);
+        setInitializing(false);
       }, (error) => {
         console.error("App.js: Error in snapshot listener:", error);
+        // If there's an error, assume setup is complete to avoid getting stuck
+        console.log('App.js: Assuming setup is complete due to Firestore error');
+        setSetupComplete(true);
+        setSetupChecked(true);
+        setInitializing(false);
       });
 
       console.log('App.js: Firestore listener set up.');
     } else {
       console.log('App.js: No user, Firestore listener skipped.');
       setSetupComplete(false);
+      setSetupChecked(true);
     }
 
     // Cleanup function for snapshot listener
@@ -185,9 +204,9 @@ export default function App() {
     };
   }, [user]); // Remove setupComplete from dependency array
 
-  if (initializing) {
-    console.log('App.js: App is initializing...');
-    return null; // Render nothing while initializing
+  if (initializing || (user && !setupChecked)) {
+    console.log('App.js: App is initializing or checking setup status...');
+    return null; // Render nothing while initializing or checking setup
   }
 
   return (

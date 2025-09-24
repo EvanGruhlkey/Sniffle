@@ -4,8 +4,9 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert, Animated, Dimensions, Easing
 } from 'react-native';
 import { TextInput, Button, DefaultTheme } from 'react-native-paper';
-import { auth } from '../firebase';
+import { auth, firestore } from '../firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -118,7 +119,31 @@ export default function LoginScreen({ navigation }) {
 
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const user = userCredential.user;
+      
+      // Check if user document exists and update setupComplete for existing users
+      const userDocRef = doc(firestore, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        console.log('LoginScreen: User data found:', userData);
+        // If setupComplete is not set or is false, but user already exists, set it to true
+        if (userData.setupComplete !== true) {
+          console.log('LoginScreen: Setting setupComplete to true for existing user');
+          await updateDoc(userDocRef, {
+            setupComplete: true
+          });
+          console.log('LoginScreen: setupComplete updated successfully');
+          // Small delay to ensure the update propagates
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+          console.log('LoginScreen: User already has setupComplete set to true');
+        }
+      } else {
+        console.log('LoginScreen: No user document found - this should not happen for existing users');
+      }
       // Navigation will be handled automatically by the auth state listener in App.js
     } catch (error) {
       let errorMessage = 'Failed to sign in';

@@ -25,49 +25,28 @@ import { signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export default function ProfileScreen() {
-  const { userData, setUserData } = useContext(UserContext);
-  const [loading, setLoading] = useState(true);
+  const { userData, setUserData, loading: contextLoading } = useContext(UserContext);
+  const [loading, setLoading] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(true);
-  const [user, setUser] = useState(null);
   
   useEffect(() => {
-    loadUserProfile();
+    // Only fetch preferences, userData comes from context
     fetchUserPreferences();
   }, []);
   
-  const loadUserProfile = async () => {
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) return;
-
-      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
-      if (userDoc.exists()) {
-        setUser(userDoc.data());
-      }
-    } catch (error) {
-      console.error('Error loading profile:', error);
-      Alert.alert('Error', 'Failed to load profile');
+  // Update preferences when userData changes
+  useEffect(() => {
+    if (userData) {
+      setNotificationsEnabled(userData.notifications_enabled !== false);
+      setLocationEnabled(userData.location_enabled !== false);
     }
-  };
+  }, [userData]);
   
   const fetchUserPreferences = async () => {
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) return;
-      
-      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
-        
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        
-        // Set notification and location preferences
-        setNotificationsEnabled(data.notifications_enabled !== false);
-        setLocationEnabled(data.location_enabled !== false);
-      }
-    } catch (error) {
-      console.error('Error fetching user preferences:', error);
-    }
+    // Preferences are now set via useEffect when userData changes
+    // This function is kept for consistency but could be removed
+    console.log('ProfileScreen: User preferences will be loaded from context');
   };
   
   const updatePreference = async (preference, value) => {
@@ -82,11 +61,19 @@ export default function ProfileScreen() {
       
       await setDoc(doc(firestore, 'users', currentUser.uid), updateData, { merge: true });
         
-      // Update local state
+      // Update local state (context will automatically update via listener)
       if (preference === 'notifications_enabled') {
         setNotificationsEnabled(value);
       } else if (preference === 'location_enabled') {
         setLocationEnabled(value);
+      }
+      
+      // Also update the context immediately for better UX
+      if (userData) {
+        setUserData({
+          ...userData,
+          [preference]: value
+        });
       }
     } catch (error) {
       console.error(`Error updating ${preference}:`, error);
@@ -116,6 +103,15 @@ export default function ProfileScreen() {
     );
   };
   
+  // Show loading while context is fetching user data
+  if (contextLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={styles.noDataText}>Loading profile...</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
@@ -126,8 +122,8 @@ export default function ProfileScreen() {
             color="#fff"
             style={styles.avatar}
           />
-          <Text style={styles.userName}>{userData?.name || 'User'}</Text>
-          <Text style={styles.userEmail}>{userData?.email || 'No email'}</Text>
+          <Text style={styles.userName}>{userData?.name || auth.currentUser?.displayName || 'User'}</Text>
+          <Text style={styles.userEmail}>{userData?.email || auth.currentUser?.email || 'No email'}</Text>
         </View>
         
         <Card style={styles.card}>

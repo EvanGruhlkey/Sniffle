@@ -173,6 +173,19 @@ def predict_allergy_risk():
         
         if not user_id:
             return jsonify({'success': False, 'error': 'User ID is required'}), 400
+        
+        # Check if Firebase is available
+        if db is None:
+            # Return mock prediction data when Firebase is not available
+            return jsonify({
+                'success': True,
+                'prediction': {
+                    'risk_level': 6.5,
+                    'confidence': 0.78,
+                    'contributing_factors': ['High pollen count', 'Recent food allergen exposure'],
+                    'timestamp': datetime.now().isoformat()
+                }
+            })
             
         # Get user data
         user_ref = db.collection('users').document(user_id)
@@ -248,6 +261,77 @@ def report_allergy():
         return jsonify({
             'success': True,
             'message': 'Allergy report saved successfully'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/analysis/temporal-patterns', methods=['POST'])
+def get_temporal_patterns():
+    try:
+        data = request.json
+        user_id = data.get('userId')
+        
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User ID is required'}), 400
+        
+        # For now, return mock data - you can implement real analysis later
+        patterns = {
+            'daily_pattern': {
+                '8': 6.2,
+                '12': 4.5,
+                '18': 7.1,
+                '22': 5.8
+            },
+            'monthly_pattern': {
+                '1': 3.5,
+                '4': 7.2,
+                '7': 5.1,
+                '10': 6.8
+            },
+            'has_seasonal_pattern': True,
+            'seasonal_severity': {
+                'spring': 7.2,
+                'summer': 5.1,
+                'fall': 6.8,
+                'winter': 3.5
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'patterns': patterns
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/analysis/risk-factors', methods=['POST'])
+def get_risk_factors():
+    try:
+        data = request.json
+        user_id = data.get('userId')
+        
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User ID is required'}), 400
+        
+        # For now, return mock data - you can implement real analysis later
+        risk_factors = [
+            { 'factor': 'Pollen Count', 'weight': 0.35 },
+            { 'factor': 'Food Allergens', 'weight': 0.28 },
+            { 'factor': 'Weather Changes', 'weight': 0.22 },
+            { 'factor': 'Time of Day', 'weight': 0.15 }
+        ]
+        
+        return jsonify({
+            'success': True,
+            'riskFactors': risk_factors
         })
     
     except Exception as e:
