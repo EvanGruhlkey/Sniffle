@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
   completeButton: {
     marginTop: 24,
     borderRadius: 4,
-    backgroundColor: '#48D1CC', // MediumTurquoise
+    backgroundColor: '#48D1CC', // MediumTurquoise I hate css
   },
   completeButtonContent: {
     paddingVertical: 8,

@@ -4,8 +4,7 @@ import {
   View, 
   Text, 
   ScrollView, 
-  Alert,
-  TouchableOpacity
+  Alert
 } from 'react-native';
 import { 
   TextInput, 
@@ -17,82 +16,78 @@ import {
 } from 'react-native-paper';
 import { auth, firestore } from '../firebase';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, setDoc, getDoc, query, orderBy, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, arrayUnion, addDoc, serverTimestamp } from 'firebase/firestore';
+import Slider from '@react-native-community/slider';
 
-const COMMON_FOODS = [
-  'Milk', 'Eggs', 'Bread', 'Pasta', 'Rice', 
-  'Chicken', 'Beef', 'Fish', 'Peanuts', 'Tree nuts',
-  'Soy', 'Wheat', 'Corn', 'Shellfish', 'Fruits', 'Vegetables'
+const COMMON_SYMPTOMS = [
+  'Itching', 'Rash', 'Hives', 'Swelling', 'Sneezing',
+  'Runny nose', 'Watery eyes', 'Coughing', 'Wheezing',
+  'Shortness of breath', 'Nausea', 'Stomach pain', 'Diarrhea',
+  'Headache', 'Dizziness', 'Throat tightness', 'Fatigue'
 ];
 
 export default function FoodLogScreen() {
-  const [selectedFoods, setSelectedFoods] = useState([]);
-  const [customFood, setCustomFood] = useState('');
+  // Allergy reaction states
+  const [severity, setSeverity] = useState(5);
+  const [symptoms, setSymptoms] = useState([]);
   const [notes, setNotes] = useState('');
-  const [foodLogs, setFoodLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [fetchingLogs, setFetchingLogs] = useState(true);
+  const [recentReactions, setRecentReactions] = useState([]);
+  const [fetchingReactions, setFetchingReactions] = useState(true);
   
   useEffect(() => {
-    fetchFoodLogs();
+    fetchRecentReactions();
   }, []);
   
-  const fetchFoodLogs = async () => {
+  const fetchRecentReactions = async () => {
     try {
-      setFetchingLogs(true);
+      setFetchingReactions(true);
       const currentUser = auth.currentUser;
       
-      if (!currentUser) return;
+      if (!currentUser) {
+        console.log('No current user found');
+        return;
+      }
       
-      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
-        
+      console.log('Fetching reactions for user:', currentUser.uid);
+      const userRef = doc(firestore, 'users', currentUser.uid);
+      const userDoc = await getDoc(userRef);
+      
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        // Get food logs and sort by timestamp (newest first)
-        const logs = userData.food_logs || [];
+        const reactions = userData.allergy_reactions || [];
+        console.log('Found reactions:', reactions.length);
         
-        // Convert Firestore timestamps to Date objects for sorting
-        const logsWithDates = logs.map(log => ({
-          ...log,
-          date: log.timestamp ? log.timestamp.toDate() : new Date()
-        }));
-        
-        // Sort by date (newest first)
-        logsWithDates.sort((a, b) => b.date - a.date);
-        
-        setFoodLogs(logsWithDates);
+        // Sort by timestamp, most recent first
+        const sortedReactions = reactions.sort((a, b) => {
+          const aTime = a.timestamp?.toDate?.() || new Date(a.timestamp);
+          const bTime = b.timestamp?.toDate?.() || new Date(b.timestamp);
+          return bTime - aTime;
+        });
+        setRecentReactions(sortedReactions.slice(0, 10)); // Show last 10 reactions
+      } else {
+        console.log('User document does not exist');
+        setRecentReactions([]);
       }
     } catch (error) {
-      console.error('Error fetching food logs:', error);
-      Alert.alert('Error', 'Failed to load your food logs');
+      console.error('Error fetching reactions:', error);
+      Alert.alert('Error', `Failed to load reaction history: ${error.message}`);
     } finally {
-      setFetchingLogs(false);
+      setFetchingReactions(false);
     }
   };
-  
-  const toggleFood = (food) => {
-    if (selectedFoods.includes(food)) {
-      setSelectedFoods(selectedFoods.filter(item => item !== food));
+
+  const toggleSymptom = (symptom) => {
+    if (symptoms.includes(symptom)) {
+      setSymptoms(symptoms.filter(item => item !== symptom));
     } else {
-      setSelectedFoods([...selectedFoods, food]);
+      setSymptoms([...symptoms, symptom]);
     }
   };
-  
-  const addCustomFood = () => {
-    if (!customFood.trim()) return;
-    
-    const formattedFood = customFood.trim();
-    if (!selectedFoods.includes(formattedFood)) {
-      setSelectedFoods([...selectedFoods, formattedFood]);
-      setCustomFood('');
-    } else {
-      Alert.alert('Duplicate', 'This food is already in your list');
-    }
-  };
-  
-  const saveFoodLog = async () => {
-    if (selectedFoods.length === 0) {
-      Alert.alert('Error', 'Please select at least one food item');
+
+  const reportReaction = async () => {
+    if (symptoms.length === 0) {
+      Alert.alert('Error', 'Please select at least one symptom');
       return;
     }
     
@@ -104,43 +99,68 @@ export default function FoodLogScreen() {
         throw new Error('User not found');
       }
       
-      // Create food log entry
-      const foodLog = {
-        items: selectedFoods,
+      // Create allergy report
+      const report = {
+        severity: Math.round(severity),
+        symptoms: symptoms,
         notes: notes.trim(),
         timestamp: new Date()
       };
       
-      // Add to user's food logs array (create doc if missing)
+      // Add to user's allergy reactions array
       const userRef = doc(firestore, 'users', currentUser.uid);
-      await setDoc(userRef, { food_logs: arrayUnion(foodLog) }, { merge: true });
       
-      // Also add to separate collection for easier querying
-      await addDoc(collection(firestore, 'allergy_reports'), {
-        userId: currentUser.uid,
-        ...foodLog
-      });
-
+      try {
+        // First ensure user document exists
+        const userDoc = await getDoc(userRef);
+        if (!userDoc.exists()) {
+          await setDoc(userRef, { allergy_reactions: [] });
+        }
+        
+        // Add reaction to user's array
+        await setDoc(userRef, { 
+          allergy_reactions: arrayUnion(report) 
+        }, { merge: true });
+        
+        console.log('Reaction saved to user document');
+        
+        // Note: Skipping separate collection to avoid permission issues
+        // The user document storage is sufficient for the allergy risk calculation
+      } catch (firebaseError) {
+        console.error('Firebase error details:', firebaseError);
+        throw new Error(`Failed to save to Firebase: ${firebaseError.message}`);
+      }
+      
       // Clear form
-      setSelectedFoods([]);
+      setSymptoms([]);
       setNotes('');
+      setSeverity(5);
       
-      // Refresh logs
-      fetchFoodLogs();
+      // Refresh reactions list
+      fetchRecentReactions();
       
-      Alert.alert('Success', 'Food log saved successfully');
+      Alert.alert(
+        'Reaction Reported',
+        'Your allergy reaction has been recorded. This will help improve your personalized risk assessment.',
+        [{ text: 'OK' }]
+      );
     } catch (error) {
-      console.error('Error saving food log:', error);
-      Alert.alert('Error', 'Failed to save your food log');
+      console.error('Error reporting reaction:', error);
+      Alert.alert(
+        'Error Saving Reaction', 
+        `Failed to save your reaction report: ${error.message}`,
+        [{ text: 'OK' }]
+      );
     } finally {
       setLoading(false);
     }
   };
-  
+
   const formatDate = (date) => {
     if (!date) return 'Unknown date';
     
-    return date.toLocaleDateString('en-US', {
+    const reactionDate = date.toDate ? date.toDate() : new Date(date);
+    return reactionDate.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -148,123 +168,159 @@ export default function FoodLogScreen() {
       minute: '2-digit'
     });
   };
-  
+
+  const getSeverityColor = (sev) => {
+    if (sev <= 3) return '#4CAF50'; // Green for mild
+    if (sev <= 6) return '#FF9800'; // Orange for moderate
+    return '#F44336'; // Red for severe
+  };
+
+  const getSeverityLabel = (sev) => {
+    if (sev <= 3) return 'Mild';
+    if (sev <= 6) return 'Moderate';
+    return 'Severe';
+  };
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Log Your Food</Text>
+        <Text style={styles.title}>Report Allergy Reaction</Text>
         <Text style={styles.subtitle}>
-          Keep track of what you eat to help identify potential triggers
+          Help us track your reactions to improve your personalized risk assessment
         </Text>
         
+        {/* Severity Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Select Foods</Text>
-          <Text style={styles.sectionDescription}>
-            Tap on all foods you've consumed recently
-          </Text>
+          <Text style={styles.sectionTitle}>Reaction Severity</Text>
+          <Text style={styles.subtitle}>Rate how severe your reaction was (1-10)</Text>
           
-          <View style={styles.foodChips}>
-            {COMMON_FOODS.map((food) => (
+          <View style={styles.sliderContainer}>
+            <Slider
+              style={styles.slider}
+              minimumValue={1}
+              maximumValue={10}
+              value={severity}
+              onValueChange={setSeverity}
+              step={1}
+              minimumTrackTintColor="#00CED1"
+              maximumTrackTintColor="#E0E0E0"
+              thumbStyle={styles.sliderThumb}
+            />
+            <View style={styles.sliderLabels}>
+              <Text style={styles.sliderLabel}>Mild</Text>
+              <View style={styles.severityDisplay}>
+                <Text style={[styles.severityValue, { color: getSeverityColor(severity) }]}>
+                  {Math.round(severity)}
+                </Text>
+                <Text style={[styles.severityLabel, { color: getSeverityColor(severity) }]}>
+                  {getSeverityLabel(severity)}
+                </Text>
+              </View>
+              <Text style={styles.sliderLabel}>Severe</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Symptoms Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Symptoms</Text>
+          <Text style={styles.subtitle}>Select all symptoms you experienced</Text>
+          
+          <View style={styles.symptomsContainer}>
+            {COMMON_SYMPTOMS.map((symptom) => (
               <Chip
-                key={food}
-                selected={selectedFoods.includes(food)}
-                onPress={() => toggleFood(food)}
+                key={symptom}
+                selected={symptoms.includes(symptom)}
+                onPress={() => toggleSymptom(symptom)}
                 style={styles.chip}
                 selectedColor="#00CED1"
-                mode={selectedFoods.includes(food) ? 'flat' : 'outlined'}
+                mode={symptoms.includes(symptom) ? 'flat' : 'outlined'}
               >
-                {food}
+                {symptom}
               </Chip>
             ))}
           </View>
-        </View>
-        
-        <Divider style={styles.divider} />
-        
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Add Custom Food</Text>
           
-          <View style={styles.customFoodContainer}>
-            <TextInput
-              mode="outlined"
-              label="Food item"
-              value={customFood}
-              onChangeText={setCustomFood}
-              style={styles.customFoodInput}
-            />
-            <Button 
-              mode="contained" 
-              onPress={addCustomFood}
-              style={styles.addButton}
-            >
-              Add
-            </Button>
-          </View>
-          
-          {selectedFoods.length > 0 && (
-            <View style={styles.selectedFoods}>
-              <Text style={styles.selectedTitle}>Your Selected Foods:</Text>
-              <View style={styles.selectedChips}>
-                {selectedFoods.map((food) => (
-                  <Chip
-                    key={food}
-                    onClose={() => toggleFood(food)}
-                    style={styles.selectedChip}
-                  >
-                    {food}
-                  </Chip>
-                ))}
-              </View>
+          {symptoms.length > 0 && (
+            <View style={styles.selectedSymptoms}>
+              <Text style={styles.selectedTitle}>Selected Symptoms:</Text>
+              <Text style={styles.symptomsText}>
+                {symptoms.join(', ')}
+              </Text>
             </View>
           )}
         </View>
+
         
+        {/* Notes Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Notes</Text>
+          <Text style={styles.sectionTitle}>Additional Notes</Text>
           <TextInput
             mode="outlined"
-            label="Add notes about this meal (optional)"
+            label="Any additional details about this reaction"
             value={notes}
             onChangeText={setNotes}
             multiline
-            numberOfLines={3}
-            style={styles.notesInput}
+            numberOfLines={4}
+            style={styles.input}
+            placeholder="When did it start? How long did it last? What helped?"
           />
         </View>
         
+        {/* Submit Button */}
         <Button
           mode="contained"
-          onPress={saveFoodLog}
+          onPress={reportReaction}
           loading={loading}
-          disabled={loading || selectedFoods.length === 0}
-          style={styles.saveButton}
-          contentStyle={styles.saveButtonContent}
+          disabled={loading || symptoms.length === 0}
+          style={styles.submitButton}
+          contentStyle={styles.submitButtonContent}
         >
-          Save Food Log
+          Report Reaction
         </Button>
         
+        {/* Recent Reactions */}
         <Divider style={styles.divider} />
         
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Food Logs</Text>
+          <Text style={styles.sectionTitle}>Recent Reactions</Text>
           
-          {fetchingLogs ? (
+          {fetchingReactions ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#00CED1" />
-              <Text style={styles.loadingText}>Loading food logs...</Text>
+              <Text style={styles.loadingText}>Loading reactions...</Text>
             </View>
-          ) : foodLogs.length > 0 ? (
-            foodLogs.map((log, index) => (
-              <List.Item
-                key={index}
-                title={formatDate(log.date)}
-                description={log.items.join(', ')}
-                left={props => <List.Icon {...props} icon="food" />}
-                style={styles.logItem}
-              />
+          ) : recentReactions.length > 0 ? (
+            recentReactions.map((reaction, index) => (
+              <View key={index} style={styles.reactionItem}>
+                <View style={styles.reactionHeader}>
+                  <Text style={styles.reactionDate}>
+                    {formatDate(reaction.timestamp)}
+                  </Text>
+                  <View style={[styles.severityBadge, { backgroundColor: getSeverityColor(reaction.severity) }]}>
+                    <Text style={styles.severityBadgeText}>
+                      {getSeverityLabel(reaction.severity)} ({reaction.severity}/10)
+                    </Text>
+                  </View>
+                </View>
+                
+                <Text style={styles.reactionSymptoms}>
+                  <Text style={styles.label}>Symptoms: </Text>
+                  {reaction.symptoms.join(', ')}
+                </Text>
+                
+                {reaction.notes && (
+                  <Text style={styles.reactionNotes}>
+                    <Text style={styles.label}>Notes: </Text>
+                    {reaction.notes}
+                  </Text>
+                )}
+              </View>
             ))
           ) : (
-            <Text style={styles.emptyText}>No food logs yet</Text>
+            <Text style={styles.noDataText}>
+              No reactions reported yet. Use the form above to report your first reaction.
+            </Text>
           )}
         </View>
       </View>
@@ -275,133 +331,167 @@ export default function FoodLogScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#E0FFFF', // Light Cyan
+    backgroundColor: '#E0FFFF',
   },
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#008B8B', // Dark Cyan
     marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    color: '#008B8B',
   },
   subtitle: {
-    fontSize: 18,
-    color: '#20B2AA', // Light Sea Green
+    fontSize: 16,
+    color: '#20B2AA',
     marginBottom: 24,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#008B8B', // Dark Cyan
+    marginBottom: 8,
+    color: '#008B8B',
   },
-  sectionDescription: {
-    color: '#20B2AA', // Light Sea Green
-    marginBottom: 16,
-    fontSize: 16,
+  sliderContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    backgroundColor: '#F0FFFF',
+    borderRadius: 12,
   },
-  foodChips: {
+  slider: {
+    width: '100%',
+    height: 40,
+  },
+  sliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  sliderLabel: {
+    fontSize: 14,
+    color: '#20B2AA',
+  },
+  severityDisplay: {
+    alignItems: 'center',
+  },
+  severityValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  severityLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  sliderThumb: {
+    backgroundColor: '#00CED1',
+  },
+  symptomsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    marginBottom: 16,
   },
   chip: {
     margin: 4,
-    backgroundColor: '#F0FFFF', // Azure
-    borderColor: '#00CED1', // Deep Turquoise
-  },
-  divider: {
-    marginVertical: 20,
-    backgroundColor: '#00CED1', // Deep Turquoise
-    height: 1,
-  },
-  customFoodContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  customFoodInput: {
-    flex: 1,
-    marginRight: 12,
     backgroundColor: '#FFFFFF',
   },
-  addButton: {
-    marginLeft: 8,
-    backgroundColor: '#00CED1', // Deep Turquoise
-  },
-  selectedFoods: {
-    marginTop: 20,
-    backgroundColor: '#F0FFFF', // Azure
+  selectedSymptoms: {
+    marginTop: 16,
     padding: 16,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: '#F0FFFF',
+    borderRadius: 8,
   },
   selectedTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#008B8B', // Dark Cyan
+    color: '#008B8B',
+    marginBottom: 8,
   },
-  selectedChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  symptomsText: {
+    fontSize: 14,
+    color: '#20B2AA',
+    lineHeight: 20,
   },
-  selectedChip: {
-    margin: 4,
-    backgroundColor: '#00CED1', // Deep Turquoise
-  },
-  notesInput: {
-    marginTop: 12,
+  input: {
     backgroundColor: '#FFFFFF',
   },
-  saveButton: {
+  submitButton: {
+    backgroundColor: '#00CED1',
     marginTop: 16,
-    borderRadius: 12,
-    backgroundColor: '#00CED1', // Deep Turquoise
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
   },
-  saveButtonContent: {
+  submitButtonContent: {
     paddingVertical: 8,
   },
-  loadingContainer: {
+  divider: {
+    backgroundColor: '#B0E0E6',
+    height: 1,
+    marginVertical: 24,
+  },
+  reactionItem: {
+    backgroundColor: '#F0FFFF',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#00CED1',
+  },
+  reactionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    marginBottom: 8,
+  },
+  reactionDate: {
+    fontSize: 14,
+    color: '#008B8B',
+    fontWeight: '600',
+  },
+  severityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  severityBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  reactionSymptoms: {
+    fontSize: 14,
+    color: '#20B2AA',
+    marginBottom: 4,
+  },
+  reactionNotes: {
+    fontSize: 14,
+    color: '#20B2AA',
+    fontStyle: 'italic',
+  },
+  label: {
+    fontWeight: '600',
+    color: '#008B8B',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
   },
   loadingText: {
-    marginTop: 12,
-    color: '#008B8B', // Dark Cyan
+    marginLeft: 10,
     fontSize: 16,
+    color: '#008B8B',
   },
-  logItem: {
-    backgroundColor: '#F0FFFF', // Azure
-    borderRadius: 12,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  emptyText: {
+  noDataText: {
     textAlign: 'center',
-    color: '#20B2AA', // Light Sea Green
-    padding: 24,
     fontSize: 16,
+    color: '#20B2AA',
+    fontStyle: 'italic',
+    padding: 20,
   },
 });

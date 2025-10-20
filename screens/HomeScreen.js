@@ -7,7 +7,20 @@ import {
 } from 'react-native';
 import { Card, Title, Paragraph, Button, ActivityIndicator } from 'react-native-paper';
 import { UserContext } from '../context/UserContext';
-import { getRiskColor, fetchEnvironmentalData } from '../utils/helpers';
+import { getRiskColor, fetchEnvironmentalData, calculateAllergyRisk } from '../utils/helpers';
+
+// Helper functions for allergy severity
+const getSeverityColor = (severity) => {
+  if (severity <= 3) return '#4CAF50'; // Green for mild
+  if (severity <= 6) return '#FF9800'; // Orange for moderate
+  return '#F44336'; // Red for severe
+};
+
+const getSeverityLabel = (severity) => {
+  if (severity <= 3) return 'Mild';
+  if (severity <= 6) return 'Moderate';
+  return 'Severe';
+};
 import { API_URL } from '../config';
 import { doc, collection, query, orderBy, limit, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, firestore } from '../firebase';
@@ -18,7 +31,8 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [prediction, setPrediction] = useState(null);
   const [environmentalData, setEnvironmentalData] = useState(null);
-  const [recentFoodLogs, setRecentFoodLogs] = useState([]);
+  const [environmentalError, setEnvironmentalError] = useState(null);
+  const [recentAllergyLogs, setRecentAllergyLogs] = useState([]);
 
   useEffect(() => {
     console.log('HomeScreen: Mounted. Starting useEffect.');
@@ -30,26 +44,48 @@ export default function HomeScreen({ navigation }) {
         
         if (!currentUser) {
           console.log('HomeScreen: No user found');
+          setLoading(false);
           return;
         }
 
         console.log('HomeScreen: Loading additional data for user:', currentUser.uid);
         
-        // Get most recent food logs from userData
-        if (userData && userData.food_logs) {
-          const recentLogs = userData.food_logs.slice(-3).reverse();
-          setRecentFoodLogs(recentLogs);
+        // Add overall timeout for entire loading process
+        const startTime = Date.now();
+        const MAX_LOAD_TIME = 15000; // 15 seconds max
+        
+        // Get most recent allergy reactions from userData
+        if (userData && userData.allergy_reactions) {
+          const recentReactions = userData.allergy_reactions.slice(-3).reverse();
+          setRecentAllergyLogs(recentReactions);
         }
         
-        // Fetch environmental data
-        const envData = await fetchEnvironmentalData();
-        setEnvironmentalData(envData);
+        // Fetch environmental data with improved error handling
+        try {
+          console.log('HomeScreen: Starting environmental data fetch...');
+          const envData = await fetchEnvironmentalData();
+          console.log('HomeScreen: Got environmental data:', envData);
+          setEnvironmentalData(envData);
+        } catch (error) {
+          console.error('HomeScreen: Failed to get environmental data:', error);
+          setEnvironmentalData(null);
+          
+          // Store error info for user feedback
+          setEnvironmentalError(error.message);
+        }
         
-        // Get latest prediction
-        await fetchLatestPrediction(currentUser);
+        // Get latest prediction with timeout check
+        const elapsedTime = Date.now() - startTime;
+        if (elapsedTime < MAX_LOAD_TIME) {
+          await fetchLatestPrediction(currentUser);
+        } else {
+          console.log('HomeScreen: Skipping prediction fetch due to timeout');
+        }
+        
+        console.log('HomeScreen: Data loading completed in', Date.now() - startTime, 'ms');
       } catch (error) {
         console.error('HomeScreen: Error loading additional data:', error);
-        Alert.alert('Error', 'Failed to load some data');
+        // Don't show alert during initial load
       } finally {
         setLoading(false);
       }
@@ -62,6 +98,7 @@ export default function HomeScreen({ navigation }) {
 
   const fetchLatestPrediction = async (currentUser) => {
     try {
+      console.log('HomeScreen: Fetching latest prediction for user:', currentUser.uid);
       // Get latest prediction from Firestore
       const predictionsQuery = query(
         collection(firestore, 'users', currentUser.uid, 'predictions'),
@@ -73,14 +110,17 @@ export default function HomeScreen({ navigation }) {
         
       if (!predictionsSnapshot.empty) {
         const predictionData = predictionsSnapshot.docs[0].data();
+        console.log('HomeScreen: Found existing prediction');
         setPrediction(predictionData);
       } else {
-        // If no prediction exists, request a new one
+        console.log('HomeScreen: No existing prediction, generating new one');
+        // If no prediction exists, request a new one but don't block loading
         requestNewPrediction(0);
       }
     } catch (error) {
-      console.error('Error fetching prediction:', error);
-      Alert.alert('Error', 'Failed to load prediction data');
+      console.error('HomeScreen: Error fetching prediction:', error);
+      // Don't show alert during loading, just log and continue
+      setPrediction(null);
     }
   };
 
@@ -89,10 +129,13 @@ export default function HomeScreen({ navigation }) {
     const RETRY_DELAY = 2000; // 2 seconds
 
     try {
-      setLoading(true);
+      console.log('HomeScreen: Requesting new prediction, retry count:', retryCount);
       const currentUser = auth.currentUser;
       
-      if (!currentUser) return;
+      if (!currentUser) {
+        console.log('HomeScreen: No current user for prediction request');
+        return;
+      }
       
       // Request prediction from API
       const response = await fetch(`${API_URL}/api/predict/allergy-risk`, {
@@ -121,40 +164,58 @@ export default function HomeScreen({ navigation }) {
         throw new Error(result.error || 'Failed to get prediction');
       }
     } catch (error) {
-      console.error('Error getting prediction:', error);
+      console.error('HomeScreen: Error getting prediction:', error);
       
       // Retry logic for network errors
       if (retryCount < MAX_RETRIES && 
           (error.message.includes('Network request failed') || 
            error.message.includes('Could not reach Cloud Firestore backend'))) {
-        console.log(`Retrying prediction request (${retryCount + 1}/${MAX_RETRIES})...`);
+        console.log(`HomeScreen: Retrying prediction request (${retryCount + 1}/${MAX_RETRIES})...`);
         setTimeout(() => {
           requestNewPrediction(retryCount + 1);
         }, RETRY_DELAY);
         return;
       }
       
-      Alert.alert(
-        'Connection Error',
-        'Unable to get prediction. Please check your internet connection and try again.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: () => requestNewPrediction(0) }
-        ]
-      );
-    } finally {
-      setLoading(false);
+      // Don't show alert if we're still loading the main screen
+      if (!loading) {
+        Alert.alert(
+          'Prediction Error',
+          'Unable to get allergy prediction. You can try refreshing later.',
+          [{ text: 'OK' }]
+        );
+      }
+      
+      // Set prediction to null so the screen can still load
+      setPrediction(null);
     }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
+    setEnvironmentalError(null); // Clear previous errors
+    
     try {
       const currentUser = auth.currentUser;
       if (currentUser) {
         await fetchLatestPrediction(currentUser);
-        const envData = await fetchEnvironmentalData();
-        setEnvironmentalData(envData);
+        
+        try {
+          const envData = await fetchEnvironmentalData();
+          setEnvironmentalData(envData);
+          setEnvironmentalError(null);
+        } catch (envError) {
+          console.error('HomeScreen: Error refreshing environmental data:', envError);
+          setEnvironmentalData(null);
+          setEnvironmentalError(envError.message);
+          
+          // Show user-friendly error alert on manual refresh
+          Alert.alert(
+            'Environmental Data Error',
+            `Unable to fetch current environmental conditions: ${envError.message}`,
+            [{ text: 'OK' }]
+          );
+        }
       }
     } catch (error) {
       console.error('HomeScreen: Error refreshing data:', error);
@@ -213,61 +274,57 @@ export default function HomeScreen({ navigation }) {
         </Text>
       </View>
       
-      {/* Risk prediction card */}
+      {/* Allergy Risk Assessment */}
       <Card style={styles.card}>
         <Card.Content>
-          <Title>Current Allergy Risk</Title>
-          {prediction ? (
-            <>
-              <View style={styles.riskIndicatorContainer}>
-                <View 
-                  style={[
-                    styles.riskIndicator, 
-                    { backgroundColor: getRiskColor(prediction.risk_level) }
-                  ]}
-                >
-                  <Text style={styles.riskText}>
-                    {Math.round(prediction.risk_level * 100)}%
-                  </Text>
+          <Title>Today's Allergy Risk</Title>
+          {environmentalData ? (() => {
+            const allergyRisk = calculateAllergyRisk(environmentalData, userData);
+            return (
+              <>
+                {/* Overall Allergy Risk */}
+                <View style={[styles.allergyRiskContainer, { backgroundColor: allergyRisk.color + '15' }]}>
+                  <View style={styles.riskHeader}>
+                    <View style={styles.riskBadgeContainer}>
+                      <View style={[styles.riskBadge, { backgroundColor: allergyRisk.color }]}>
+                        <Text style={styles.riskBadgeText}>{allergyRisk.description}</Text>
+                      </View>
+                      <View style={styles.riskScoreContainer}>
+                        <Text style={styles.riskScoreNumber}>{allergyRisk.score}</Text>
+                        <Text style={styles.riskScoreMax}>%</Text>
+                      </View>
+                    </View>
+                
+                  </View>
+                  
+                  {/* Contributing factors */}
+                  <View style={styles.factorsSection}>
+                    <Text style={styles.factorsLabel}>Key Factors:</Text>
+                    {allergyRisk.factors.slice(0, 3).map((factor, index) => (
+                      <Text key={index} style={styles.factorItem}>• {factor}</Text>
+                    ))}
+                  </View>
+                  
+                  {/* Top recommendations */}
+                  <View style={styles.recommendationsSection}>
+                    <Text style={styles.recommendationsLabel}>Recommendations:</Text>
+                    {allergyRisk.recommendations.slice(0, 2).map((rec, index) => (
+                      <Text key={index} style={styles.recommendationItem}>• {rec}</Text>
+                    ))}
+                  </View>
                 </View>
-                <View style={styles.riskDescription}>
-                  <Text style={styles.riskLabel}>
-                    {prediction.risk_level < 0.3 ? 'Low Risk' : 
-                     prediction.risk_level < 0.7 ? 'Medium Risk' : 'High Risk'}
-                  </Text>
-                  <Text style={styles.riskDetails}>
-                    Confidence: {Math.round(prediction.confidence * 100)}%
-                  </Text>
-                </View>
-              </View>
-              
-              <View style={styles.factorsContainer}>
-                <Text style={styles.factorsTitle}>Contributing Factors:</Text>
-                {prediction.contributing_factors.map((factor, index) => (
-                  <Text key={index} style={styles.factor}>
-                    • {factor.replace(/_/g, ' ')}
-                  </Text>
-                ))}
-              </View>
-            </>
-          ) : (
+              </>
+            );
+          })() : (
             <View style={styles.noPrediction}>
-              <Text>No prediction available</Text>
-              <Button 
-                mode="contained" 
-                onPress={() => {
-                  requestNewPrediction(0);
-                }}
-                style={styles.refreshButton}
-              >
-                Get Prediction
-              </Button>
+              <ActivityIndicator size="small" color="#00CED1" />
+              <Text style={styles.envSubtext}>Calculating allergy risk...</Text>
             </View>
           )}
         </Card.Content>
       </Card>
       
-      {/* Environmental data card */}
+      {/* Environmental Conditions */}
       <Card style={styles.card}>
         <Card.Content>
           <Title>Environmental Conditions</Title>
@@ -275,80 +332,107 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.environmentalData}>
               <View style={styles.envRow}>
                 <View style={styles.envItem}>
-                  <Text style={styles.envLabel}>Pollen</Text>
+                  <Text style={styles.envLabel}>Pollen Level</Text>
                   <Text style={styles.envValue}>
-                    {environmentalData.pollen_level} 
-                    <Text style={styles.envUnit}> (index)</Text>
+                    {environmentalData.pollen_risk?.charAt(0).toUpperCase() + environmentalData.pollen_risk?.slice(1) || 'Moderate'}
                   </Text>
+                  <Text style={styles.envSubtext}>Tree, grass & weed pollen</Text>
                 </View>
                 <View style={styles.envItem}>
                   <Text style={styles.envLabel}>Air Quality</Text>
                   <Text style={styles.envValue}>
-                    {environmentalData.air_quality}
-                    <Text style={styles.envUnit}> (AQI)</Text>
+                    {environmentalData.air_quality <= 2 ? 'Good' : 
+                     environmentalData.air_quality <= 3 ? 'Moderate' : 
+                     environmentalData.air_quality <= 4 ? 'Poor' : 'Very Poor'}
                   </Text>
+                  <Text style={styles.envSubtext}>Safe for outdoor activities</Text>
                 </View>
               </View>
               <View style={styles.envRow}>
                 <View style={styles.envItem}>
-                  <Text style={styles.envLabel}>Temperature</Text>
+                  <Text style={styles.envLabel}>Weather</Text>
                   <Text style={styles.envValue}>
                     {environmentalData.temperature}°C
                   </Text>
+                  <Text style={styles.envSubtext}>{environmentalData.weather_condition || 'Clear'}</Text>
                 </View>
                 <View style={styles.envItem}>
-                  <Text style={styles.envLabel}>Humidity</Text>
+                  <Text style={styles.envLabel}>Location</Text>
                   <Text style={styles.envValue}>
-                    {environmentalData.humidity}%
+                    {environmentalData.city || 'Current'}
+                  </Text>
+                  <Text style={styles.envSubtext}>
+                    {environmentalData.region ? `${environmentalData.region} • Now` : 'Real-time'}
                   </Text>
                 </View>
               </View>
             </View>
+          ) : environmentalError ? (
+            <View style={styles.errorState}>
+              <Text style={styles.errorIcon}>⚠️</Text>
+              <Text style={styles.errorTitle}>Unable to load environmental data</Text>
+              <Text style={styles.errorMessage}>{environmentalError}</Text>
+              <Button 
+                mode="outlined" 
+                onPress={() => {
+                  setEnvironmentalError(null);
+                  fetchEnvironmentalData().then(setEnvironmentalData).catch(err => setEnvironmentalError(err.message));
+                }}
+                style={styles.retryButton}
+                labelStyle={{ color: '#008B8B' }}
+              >
+                Retry
+              </Button>
+            </View>
           ) : (
-            <Text>Environmental data unavailable</Text>
+            <View style={styles.noPrediction}>
+              <ActivityIndicator size="small" color="#00CED1" />
+              <Text style={styles.envSubtext}>Loading environmental data...</Text>
+            </View>
           )}
         </Card.Content>
       </Card>
       
-      {/* Recent food logs */}
+      {/* Recent allergy reactions */}
       <Card style={styles.card}>
         <Card.Content>
-          <Title>Recent Food Logs</Title>
-          {recentFoodLogs.length > 0 ? (
-            recentFoodLogs.map((log, index) => (
-              <View key={index} style={styles.foodLog}>
-                <Text style={styles.foodLogDate}>
-                  {log.timestamp ? new Date(log.timestamp.toDate()).toLocaleDateString() : 'Unknown date'}
-                </Text>
-                <View style={styles.foodItems}>
-                  {log.items.map((item, i) => (
-                    <Text key={i} style={styles.foodItem}>• {item}</Text>
-                  ))}
+          <Title style={{ marginBottom: 16 }}>Recent Allergy Reactions</Title>
+          {recentAllergyLogs.length > 0 ? (
+            recentAllergyLogs.map((reaction, index) => (
+              <View key={index} style={styles.allergyLog}>
+                <View style={styles.allergyLogHeader}>
+                  <Text style={styles.allergyLogDate}>
+                    {reaction.timestamp ? new Date(reaction.timestamp.toDate ? reaction.timestamp.toDate() : reaction.timestamp).toLocaleDateString() : 'Unknown date'}
+                  </Text>
+                  <View style={[styles.severityBadge, { backgroundColor: getSeverityColor(reaction.severity) }]}>
+                    <Text style={styles.severityBadgeText}>
+                      {getSeverityLabel(reaction.severity)}
+                    </Text>
+                  </View>
                 </View>
-                {log.notes && <Text style={styles.foodNotes}>Note: {log.notes}</Text>}
+                <View style={styles.allergySymptoms}>
+                  <Text style={styles.symptomsLabel}>Symptoms:</Text>
+                  <Text style={styles.symptomsText}>
+                    {reaction.symptoms.slice(0, 3).join(', ')}
+                    {reaction.symptoms.length > 3 && ` +${reaction.symptoms.length - 3} more`}
+                  </Text>
+                </View>
+                {reaction.notes && <Text style={styles.allergyNotes}>Note: {reaction.notes}</Text>}
               </View>
             ))
           ) : (
-            <Text>No recent food logs available</Text>
+            <Text>No recent allergy reactions recorded</Text>
           )}
           <Button 
             mode="outlined" 
-            onPress={() => navigation.navigate('Food Log')}
+            onPress={() => navigation.navigate('Allergy Log')}
             style={styles.viewMoreButton}
             labelStyle={{ color: '#008B8B' }}
           >
-            Log Food
+            Report Reaction
           </Button>
         </Card.Content>
       </Card>
-      
-      {/* Report allergy button */}
-      <TouchableOpacity 
-        style={styles.reportButton} 
-        onPress={handleAllergyReport}
-      >
-        <Text style={styles.reportButtonText}>Report Allergy Reaction</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -489,27 +573,56 @@ const styles = StyleSheet.create({
     fontWeight: 'normal',
     color: '#20B2AA', // Light Sea Green
   },
-  foodLog: {
+  envSubtext: {
+    fontSize: 12,
+    color: '#008B8B', // Dark Cyan
+    marginTop: 4,
+    textTransform: 'capitalize',
+  },
+  allergyLog: {
     marginBottom: 20,
     padding: 16,
     backgroundColor: '#F0FFFF', // Azure
     borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#00CED1',
   },
-  foodLogDate: {
-    fontSize: 16,
+  allergyLogHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  allergyLogDate: {
+    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 12,
     color: '#008B8B', // Dark Cyan
   },
-  foodItems: {
-    marginBottom: 12,
+  severityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  foodItem: {
-    fontSize: 16,
-    marginBottom: 6,
-    color: '#20B2AA', // Light Sea Green
+  severityBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
-  foodNotes: {
+  allergySymptoms: {
+    marginBottom: 8,
+  },
+  symptomsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#008B8B',
+    marginBottom: 4,
+  },
+  symptomsText: {
+    fontSize: 14,
+    color: '#20B2AA',
+    lineHeight: 18,
+  },
+  allergyNotes: {
     fontSize: 14,
     fontStyle: 'italic',
     color: '#008B8B', // Dark Cyan
@@ -547,5 +660,139 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     backgroundColor: '#00CED1', // Deep Turquoise
+  },
+  errorState: {
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#FFF8E1',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FFB74D',
+  },
+  errorIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  errorTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#E65100',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#F57C00',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  retryButton: {
+    borderColor: '#FF9800',
+    marginTop: 8,
+  },
+  allergyRiskContainer: {
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  riskHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  riskBadgeContainer: {
+    alignItems: 'flex-start',
+  },
+  riskBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    marginBottom: 8,
+  },
+  riskBadgeText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  riskScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    elevation: 1,
+  },
+  riskScoreNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#008B8B',
+  },
+  riskScoreMax: {
+    fontSize: 16,
+    color: '#666',
+    marginLeft: 2,
+  },
+  personalizedIndicator: {
+    fontSize: 10,
+    color: '#0066CC',
+    fontWeight: '600',
+    marginLeft: 8,
+    textTransform: 'uppercase',
+  },
+  riskLocation: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  factorsSection: {
+    marginBottom: 16,
+  },
+  factorsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#008B8B',
+    marginBottom: 8,
+  },
+  factorItem: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  recommendationsSection: {
+    marginBottom: 8,
+  },
+  recommendationsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#008B8B',
+    marginBottom: 8,
+  },
+  recommendationItem: {
+    fontSize: 14,
+    color: '#0066CC',
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  detailsSection: {
+    backgroundColor: '#F8FFFF',
+    borderRadius: 12,
+    padding: 16,
+  },
+  detailsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#008B8B',
+    marginBottom: 12,
   },
 });

@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -52,8 +53,8 @@ function MainTabs() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Food Log') {
-            iconName = focused ? 'restaurant' : 'restaurant-outline';
+          } else if (route.name === 'Allergy Log') {
+            iconName = focused ? 'medical' : 'medical-outline';
           } else if (route.name === 'Prediction') {
             iconName = focused ? 'analytics' : 'analytics-outline';
           } else if (route.name === 'Profile') {
@@ -72,13 +73,20 @@ function MainTabs() {
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
           shadowRadius: 4,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 65,
+          paddingBottom: 12,
+          paddingTop: 10,
+          paddingHorizontal: 16, // Add horizontal padding to prevent edge touching
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
+          marginTop: 4,
+          marginBottom: 2,
+        },
+        tabBarItemStyle: {
+          paddingHorizontal: 8, // Extra padding for each tab item
+          marginHorizontal: 4,
         },
         headerStyle: {
           backgroundColor: '#E0FFFF',
@@ -100,10 +108,10 @@ function MainTabs() {
         }}
       />
       <Tab.Screen 
-        name="Food Log" 
+        name="Allergy Log" 
         component={FoodLogScreen}
         options={{
-          title: 'Food Log',
+          title: 'Allergy Log',
         }}
       />
       <Tab.Screen 

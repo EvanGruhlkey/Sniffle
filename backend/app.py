@@ -9,6 +9,7 @@ import numpy as np
 from datetime import datetime
 from ml_models.prediction_model import AllergySeverityPredictor
 from ml_models.data_processor import DataProcessor
+from environmental_service import EnvironmentalDataService
 
 # Load environment variables
 load_dotenv()
@@ -26,9 +27,10 @@ except Exception as e:
     # For development, we can continue without Firebase
     db = None
 
-# Initialize ML models
+# Initialize ML models and services
 predictor = AllergySeverityPredictor()
 data_processor = DataProcessor()
+env_service = EnvironmentalDataService()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -332,6 +334,143 @@ def get_risk_factors():
         return jsonify({
             'success': True,
             'riskFactors': risk_factors
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/environmental/current', methods=['POST'])
+def get_current_environmental_data():
+    try:
+        data = request.json
+        print(f"📨 Received request data: {data}")
+        
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        print(f"📍 Extracted coordinates: lat={latitude}, lon={longitude}")
+        
+        if not latitude or not longitude:
+            print("❌ Missing coordinates!")
+            return jsonify({
+                'success': False, 
+                'error': 'Latitude and longitude are required'
+            }), 400
+        
+        print(f"🌍 Calling environmental service with lat={float(latitude)}, lon={float(longitude)}")
+        # Get comprehensive environmental data
+        environmental_data = env_service.get_comprehensive_environmental_data(
+            float(latitude), 
+            float(longitude)
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': environmental_data
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/environmental/risk-assessment', methods=['POST'])
+def get_environmental_risk_assessment():
+    try:
+        data = request.json
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        user_id = data.get('userId')
+        
+        if not all([latitude, longitude]):
+            return jsonify({
+                'success': False, 
+                'error': 'Latitude and longitude are required'
+            }), 400
+        
+        # Get environmental data
+        environmental_data = env_service.get_comprehensive_environmental_data(
+            float(latitude), 
+            float(longitude)
+        )
+        
+        # Get user allergens if userId provided
+        user_allergens = []
+        if user_id and db:
+            try:
+                user_ref = db.collection('users').document(user_id)
+                user_doc = user_ref.get()
+                if user_doc.exists():
+                    user_data = user_doc.data()
+                    user_allergens = user_data.get('allergens', [])
+            except Exception as e:
+                print(f"Could not fetch user allergens: {e}")
+        
+        # Get risk assessment
+        risk_assessment = env_service.get_allergy_risk_assessment(
+            environmental_data, 
+            user_allergens
+        )
+        
+        return jsonify({
+            'success': True,
+            'environmental_data': environmental_data,
+            'risk_assessment': risk_assessment
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/environmental/weather', methods=['POST'])
+def get_weather_data():
+    try:
+        data = request.json
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        
+        if not latitude or not longitude:
+            return jsonify({
+                'success': False, 
+                'error': 'Latitude and longitude are required'
+            }), 400
+        
+        weather_data = env_service.get_weather_data(float(latitude), float(longitude))
+        
+        return jsonify({
+            'success': True,
+            'weather': weather_data
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/environmental/air-quality', methods=['POST'])
+def get_air_quality_data():
+    try:
+        data = request.json
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        
+        if not latitude or not longitude:
+            return jsonify({
+                'success': False, 
+                'error': 'Latitude and longitude are required'
+            }), 400
+        
+        air_quality_data = env_service.get_air_quality_data(float(latitude), float(longitude))
+        
+        return jsonify({
+            'success': True,
+            'air_quality': air_quality_data
         })
     
     except Exception as e:

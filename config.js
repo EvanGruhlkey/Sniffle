@@ -13,7 +13,8 @@ import {
 } from '@env';
 
 // API URL - prefer env, fallback to Android emulator localhost
-export const API_URL = ENV_API_URL || 'http://10.0.2.2:5000';
+// Try computer's IP first, then emulator localhost
+export const API_URL = ENV_API_URL || 'http://192.168.40.252:5000';
 
 // Firebase configuration
 export const FIREBASE_CONFIG = {
