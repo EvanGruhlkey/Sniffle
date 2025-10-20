@@ -5,6 +5,9 @@ Breathe better. Live clearer.
 Sniffle is an intelligent allergy companion that helps you stay one step ahead of the air around you.
 
 <img src="assets/login.PNG" alt="Sniffle Demo" width="300"/>
+<img src="assets/Ssetup.PNG" alt="Sniffle Demo" width="300"/>
+<img src="assets/Sdash.PNG" alt="Sniffle Demo" width="300"/>
+<img src="assets/Spredict.PNG" alt="Sniffle Demo" width="300"/>
 
 ## Quickstart
 
