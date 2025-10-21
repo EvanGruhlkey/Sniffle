@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const dotenv = require('dotenv');
+const axios = require('axios');
 const EnvironmentalDataService = require('./environmental_service');
 const AllergySeverityPredictor = require('./ml_models/prediction_model');
 const DataProcessor = require('./ml_models/data_processor');
@@ -31,6 +32,9 @@ try {
 const predictor = new AllergySeverityPredictor();
 const dataProcessor = new DataProcessor();
 const envService = new EnvironmentalDataService();
+
+// ML Service URL
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:5001';
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -231,24 +235,49 @@ app.post('/api/predict/allergy-risk', async (req, res) => {
 
         const envData = envLogsSnapshot.docs.map(doc => doc.data());
 
-        // Process data for prediction
+        // Try to use Python ML service first, fallback to Node.js predictor
+        try {
+            const mlResponse = await axios.post(
+                `${ML_SERVICE_URL}/api/predict/allergy-risk`,
+                {
+                    userData,
+                    foodLogs,
+                    environmentalData: envData
+                },
+                { timeout: 5000 }
+            );
+
+            if (mlResponse.data.success) {
+                return res.json({
+                    success: true,
+                    prediction: {
+                        ...mlResponse.data.prediction,
+                        timestamp: new Date().toISOString(),
+                        model_type: 'scikit-learn'
+                    }
+                });
+            }
+        } catch (mlError) {
+            console.log('ML service unavailable, using fallback predictor');
+        }
+
+        // Fallback to Node.js predictor
         const processedData = dataProcessor.processForPrediction({
             userData,
             foodLogs,
             environmentalData: envData
         });
 
-        // Make prediction
         const prediction = predictor.predict(processedData);
 
-        // Format and return prediction
         res.json({
             success: true,
             prediction: {
                 risk_level: parseFloat(prediction.risk_level),
                 confidence: parseFloat(prediction.confidence),
                 contributing_factors: prediction.contributing_factors,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                model_type: 'fallback'
             }
         });
     } catch (error) {
