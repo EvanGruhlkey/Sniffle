@@ -1,4 +1,4 @@
-# 🌿 Sniffle
+# Sniffle
 
 Breathe better. Live clearer.
 
@@ -27,19 +27,26 @@ Sniffle is an intelligent allergy companion that helps you stay one step ahead o
 
 If you need to open in Android Studio: run `npx expo prebuild -p android` once, then open the `android/` folder in Android Studio and run.
 
-### Backend (Flask)
-1. Create and activate venv:
+### Backend (Node.js)
+1. Navigate to backend directory:
    ```bash
-   python -m venv venv
-   venv\Scripts\activate
+   cd backend
    ```
 2. Install deps:
    ```bash
-   pip install -r backend\requirements.txt
+   npm install
    ```
-3. Run API:
+3. Set up environment:
+   - Copy `.env.example` to `.env` in the backend directory
+   - Add your API keys (OpenWeatherMap, etc.)
+   - Place your `firebase_credentials.json` in the backend directory
+4. Run API:
    ```bash
-   python backend\app.py
+   npm start
+   ```
+   Or for development with auto-reload:
+   ```bash
+   npm run dev
    ```
 
 Default API base (Android emulator): `http://10.0.2.2:5000`

@@ -809,7 +809,7 @@ export const fetchEnvironmentalData = async (retryCount = 0) => {
     
     // Get user's current location
     const location = await getCurrentLocation();
-    console.log('📍 Location obtained:', location);
+    console.log('Location obtained:', location);
     
     // Fetch environmental data from our backend with timeout
     const controller = new AbortController();
@@ -822,7 +822,7 @@ export const fetchEnvironmentalData = async (retryCount = 0) => {
       latitude: location.latitude,
       longitude: location.longitude
     };
-    console.log('🌐 Sending request to backend with payload:', requestPayload);
+    console.log('Sending request to backend with payload:', requestPayload);
     
     const response = await fetch(`${API_URL}/api/environmental/current`, {
       method: 'POST',

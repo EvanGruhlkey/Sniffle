@@ -369,7 +369,7 @@ export default function HomeScreen({ navigation }) {
             </View>
           ) : environmentalError ? (
             <View style={styles.errorState}>
-              <Text style={styles.errorIcon}>⚠️</Text>
+              <Text style={styles.errorIcon}>!</Text>
               <Text style={styles.errorTitle}>Unable to load environmental data</Text>
               <Text style={styles.errorMessage}>{environmentalError}</Text>
               <Button 
